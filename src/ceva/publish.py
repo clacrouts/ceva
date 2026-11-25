@@ -301,7 +301,8 @@ def coverage_lines(transects: pd.DataFrame, measured: set[str], shore_types: lis
 
 
 def write_coverage(cfg: Config, out: Path, measured: set[str], area) -> dict[str, int]:
-    """``coverage.pmtiles``: the coast of ``area`` (``ceva.batch.load_area``) the dataset does not measure.
+    """``coverage.pmtiles``: the coast of ``area`` (``ceva.batch.load_area``) the dataset does not measure, and
+    ``coverage.parquet``, its transects as points (lon, lat, why) for the assistant's ``not_measured``.
     Returns the number of transects of each kind, measured ones included."""
     from ceva.batch import in_area
     from ceva.transects import typology
@@ -318,6 +319,11 @@ def write_coverage(cfg: Config, out: Path, measured: set[str], area) -> dict[str
     counts = t.assign(why=np.where(t["transect_id"].astype(str).isin(measured), "measured",
                                    t["shore_type"].fillna("unknown").astype(str)))
     counts.loc[(counts["why"].isin(cfg.batch.shore_types)), "why"] = "no_result"
+    missing = counts[counts["why"] != "measured"]
+    points = pd.DataFrame({"lon": missing["lon"].astype("float32").to_numpy(),
+                           "lat": missing["lat"].astype("float32").to_numpy(),
+                           "why": missing["why"].astype("category").to_numpy()})
+    points.to_parquet(out / "coverage.parquet", index=False, compression="zstd")
     return {k: int(v) for k, v in counts["why"].value_counts().items()}
 
 
@@ -410,10 +416,11 @@ def publish(cfg: Config, out: Path, units: list[str], method: str = "ceva", refe
         manifest["provisional"] = bool(run.get("planned") and run.get("finished") is not None
                                        and run["finished"] < run["planned"])
     if area is not None:
-        manifest["files"]["coverage"] = "coverage.pmtiles"
+        manifest["files"] |= {"coverage": "coverage.pmtiles", "coverage_points": "coverage.parquet"}
         manifest["coverage"] = write_coverage(cfg, out, set(table["id"]), area)
     else:
         (out / "coverage.pmtiles").unlink(missing_ok=True)
+        (out / "coverage.parquet").unlink(missing_ok=True)
     if index is not None and table["cvic"].notna().any():
         manifest["vulnerability"] = {
             "transects": int(table["cvic"].notna().sum()), "class_edges": edges,

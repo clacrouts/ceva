@@ -167,10 +167,12 @@ in its ZIP): the dashboard reads a unit's index when one of its transects is ope
 HTTP range requests, from the local server or from Zenodo (`/api/records/<id>/files/<name>/content` allows
 ranges from other sites). Needs ffmpeg.
 
-`ceva export` writes the full dataset for download and citation, one Zenodo record: per country, the rates
-(GeoParquet, the transects), the yearly shorelines (GeoParquet, points) and every waterline (Parquet), with a
-README (columns, method, validation, limits, licence, citation), the deposit's `metadata.json` and `SHA256SUMS`.
-The waterlines make most of its size: about 7 GB for the sand and gravel coasts of the EU.
+`ceva export` writes the full dataset for download and citation, one Zenodo record: the rates (GeoParquet, the
+transects, with the vulnerability index when it has been computed) and the yearly shorelines (GeoParquet,
+points) in one file each for the whole area, every waterline (Parquet) in one file per country, a README
+(files, columns, method, validation, limits, licence, citation), the deposit's `metadata.json` and
+`SHA256SUMS`. Parts are streamed into each file, so memory stays low however large the area. The waterlines
+make most of its size: about 7 GB for the sand and gravel coasts of the EU.
 
 `ceva vulnerability compute` ranks every transect of the runs (`ceva.vulnerability`) and stores the index,
 its six ranks, the values behind them and the class edges in `<data dir>/vulnerability/index.parquet`;
@@ -193,7 +195,8 @@ computes its filtered figures, its summary by country and its country profiles. 
 prepared, it also writes, per unit, the other products' values at each transect (shown on its card) and
 `validation.json`, the data of the dashboard's validation page (see Comparison with other products). With
 `--area`, it also draws the coast of that area the dataset does not measure (`coverage.pmtiles`: other coast
-types, and sand or gravel without a result). With `--run`, the site says whether the run is finished: until
+types, and sand or gravel without a result; and the same transects as points in `coverage.parquet`, for the
+assistant). With `--run`, the site says whether the run is finished: until
 it is, the map shows a preview banner with the countries published, and the validation page is marked
 provisional. `--only` publishes some of the finished units (names separated by commas, or `@file` with one
 per line), for a preview of areas that are complete before the whole run is.
@@ -248,6 +251,30 @@ one region. Regions processed together (`ceva process r1 r2 ...`) share the file
 `providers.<name>.share_files` says: through GDAL's cache (fewest bytes) or downloaded once, whole (fewest
 requests, fastest). Every step after the downloads is cached. A batch run of the EU's sand and gravel coasts
 (1,852 units, 248,000 transects) takes about 250 worker-hours, 85 % of them reading imagery.
+
+## Questions to the data: MCP server and chat
+
+`ceva.assistant` serves the published dataset to language models. Ten read-only tools answer from the
+rates and yearly shorelines of the Zenodo record and the dashboard's files: `about_dataset`,
+`transects_near` (a place's transects), `transect_detail`, `change_between` (any period), `area_summary`
+(a country, a box, a coastal type, a kind of shore), `rank_hotspots` (fastest erosion or accretion, by
+stretch of about 1 km or by transect), `compare_products`, `not_measured` (why there is no data),
+`images_for` and `vulnerability`. Every answer is small and rounded, flags trends that are not significant
+and imprecise positions, and links to the map and the dataset's DOI.
+
+```bash
+pip install -e ".[assistant]"
+python -m ceva.assistant --rates <rates.parquet or address> --shorelines <shorelines.parquet or address> \
+    --site ../ceva-dashboard                    # or the dashboard's address (the default)
+```
+
+It serves the MCP server at `/mcp` (streamable HTTP, for any MCP client) and the dashboard's chat at
+`/chat`. The chat sends each question, with the site's language and what the map shows, to a language model
+on a free tier (Groq, then Mistral when Groq is busy; keys `GROQ_API_KEY`, `MISTRAL_API_KEY` from the
+environment), which calls the tools in the same process: a few questions a minute per visitor, a few rounds
+of tools per question, nothing stored. `deploy/huggingface` runs it as a Hugging Face Space; the dashboard
+shows its "Ask the data" panel when `index.html` names the service (`<meta name="ceva-chat">`).
+`ceva export --products rates,shorelines` writes the two files it reads without the waterlines.
 
 ## Comparison with other products
 
@@ -491,9 +518,11 @@ src/ceva/
   frames.py            the images behind the shorelines, for the dashboard's viewer
   validation/          survey sites, benchmark, report; reference products and their agreement
   vulnerability.py     coastal vulnerability index
+  assistant/           questions to the published dataset: MCP server, the dashboard's chat
   change_metrics.py    change metrics (DSAS-style)
   cli.py               the `ceva` command
 notebooks/             ceva_step_by_step.ipynb: the processing of one beach, step by step
+deploy/huggingface/    the chat and MCP server as a Hugging Face Space
 tests/                 offline unit tests
 ```
 

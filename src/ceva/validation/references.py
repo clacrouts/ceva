@@ -43,6 +43,7 @@ log = logging.getLogger(__name__)
 METRIC_CRS = 3035                      # ETRS89 / LAEA Europe: distances in metres across Europe
 FIRST_YEAR = 1984                      # first year of the satellite record (Landsat 5)
 EUROPE = (-32.0, 27.0, 45.0, 72.0)     # lon/lat box kept from the pan-European products
+AREA = (-34.0, 25.0, 48.0, 72.0)       # and from the Shoreline Monitor: Europe and the Mediterranean
 USER_AGENT = "ceva (+https://github.com/clacrouts/ceva)"
 CLASSES = ("erosion", "stable", "accretion")
 
@@ -155,7 +156,8 @@ def _in_europe(g: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 # ------------------------------------------------------------------ building each product
 
 def _build_sm(cfg: Config) -> gpd.GeoDataFrame:
-    """The Shoreline Monitor's rate of each GCTS transect and its latest shoreline point."""
+    """The Shoreline Monitor's rate of each GCTS transect and its latest shoreline point, within ``AREA``
+    (from every continent's typology file there is: Europe, Africa, Asia)."""
     folder = cfg.data_dir / "raw" / "typology" / str(cfg.transects.typology.zenodo_record)
     files = sorted(folder.glob("*.parquet"))
     if not files:
@@ -163,7 +165,10 @@ def _build_sm(cfg: Config) -> gpd.GeoDataFrame:
     columns = {"transect_id": "transect_id", "sds:change_rate": "rate", "sds:obs_primary_count": "n_obs",
                "sds:reference_datetime": "time", "sds:reference_lon": "lon", "sds:reference_lat": "lat",
                "sds:tr_stdev": "stdev", "sds:tr_is_qa": "qa"}
-    d = pd.concat([pd.read_parquet(f, columns=list(columns)).rename(columns=columns) for f in files])
+    west, south, east, north = AREA
+    inside = [("sds:reference_lon", ">=", west), ("sds:reference_lon", "<=", east),
+              ("sds:reference_lat", ">=", south), ("sds:reference_lat", "<=", north)]
+    d = pd.concat([pd.read_parquet(f, columns=list(columns), filters=inside).rename(columns=columns) for f in files])
     d = d[d["rate"].notna() & d["lon"].notna()]
     return gpd.GeoDataFrame({
         "transect_id": d["transect_id"].astype(str).to_numpy(), "rate": d["rate"].astype("float32").to_numpy(),

@@ -1,18 +1,18 @@
-"""The full dataset for download and citation (Zenodo): every product of a run, by country, with its documentation.
+"""The full dataset for download and citation (Zenodo): every product of the runs, with its documentation.
 
-``ceva export OUT --run <run>`` writes, for each country (ISO code ``CC``):
+``ceva export OUT --run <runs>`` writes:
 
-* ``<name>_<CC>_rates.parquet`` (GeoParquet, the transects from their landward end): rate of shoreline change
-  and its 95 % range, change class, years, precision, coastal type, the Shoreline Monitor's rate, and the
-  coastal vulnerability index with its ranks and inputs (when ``ceva vulnerability compute`` has run);
-* ``<name>_<CC>_shorelines.parquet`` (GeoParquet, points): the yearly shoreline position of each transect,
-  its standard error and the number of images behind it;
-* ``<name>_<CC>_waterlines.parquet`` (Parquet): every waterline of every image, with its tide, wave level,
-  corrected position and whether it was used;
+* ``<name>_rates.parquet`` (GeoParquet, one row per transect, drawn from its landward end): rate of shoreline
+  change and its 95 % range, change class, years, precision, country, coastal type, the Shoreline Monitor's
+  rate, and the coastal vulnerability index with its ranks and inputs (when ``ceva vulnerability compute``
+  has run);
+* ``<name>_shorelines.parquet`` (GeoParquet, points): the yearly shoreline position of each transect, its
+  standard error and the number of images behind it;
+* ``<name>_<CC>_waterlines.parquet`` (Parquet), one per country (ISO code ``CC``): every waterline of every
+  image, with its tide, wave level, corrected position and whether it was used. They make most of the size;
 
-and ``README.md`` (columns, method, validation, limits, licence, how to cite), ``metadata.json`` (a Zenodo
-deposit's metadata) and ``SHA256SUMS``. A Zenodo record holds up to 100 files, so 31 countries at most fit
-in one record with the documentation.
+and ``README.md`` (files, columns, method, validation, limits, licence, how to cite), ``metadata.json`` (a
+Zenodo deposit's metadata) and ``SHA256SUMS``. A Zenodo record holds up to 100 files: 95 countries at most.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 from shapely.geometry import LineString
 
@@ -35,10 +36,14 @@ from ceva.config import Config
 log = logging.getLogger(__name__)
 
 PRODUCTS = ("rates", "shorelines", "waterlines")
+WHOLE = ("rates", "shorelines")            # one file each for the whole area; the waterlines one per country
+ZENODO_FILES = 100
 WATERLINE_COLUMNS = ["transect_id", "time", "platform", "family", "x_obs", "tide", "wave", "level", "x_corr",
                      "threshold", "outlier", "low_water", "use"]
 SITE_URL = "https://clacrouts.github.io/ceva-dashboard/"     # the map and figures, the project's public page
 SITE_CODE_URL = "https://github.com/clacrouts/ceva-dashboard"
+CODE_URL = "https://github.com/clacrouts/ceva"                     # the software that made the dataset
+IMAGES_DOI = "10.5281/zenodo.24500960"                             # the satellite images behind it (all versions)
 RELATED = [
     {"identifier": "10.5281/zenodo.14056925", "relation": "isDerivedFrom", "scheme": "doi"},    # GCTS
     {"identifier": "10.5281/zenodo.15607678", "relation": "isDerivedFrom", "scheme": "doi"},    # typology
@@ -46,12 +51,18 @@ RELATED = [
     {"identifier": "10.24381/cds.adbb2d47", "relation": "references", "scheme": "doi"},         # ERA5 single levels
     {"identifier": SITE_URL, "relation": "isSupplementedBy", "scheme": "url"},             # the dashboard
     {"identifier": SITE_CODE_URL, "relation": "isSupplementedBy", "scheme": "url"},
+    {"identifier": IMAGES_DOI, "relation": "isSupplementedBy", "scheme": "doi"},
+    {"identifier": CODE_URL, "relation": "isCompiledBy", "scheme": "url"},
+    {"identifier": "10.5285/1c44ce99-0a0d-5f4f-e063-7086abc0ea0f", "relation": "references", "scheme": "doi"},  # GEBCO
+    {"identifier": "10.5281/zenodo.5560862", "relation": "references", "scheme": "doi"},     # GIA grids, Steffen 2021
+    {"identifier": "10.1002/2014JB011176", "relation": "references", "scheme": "doi"},       # ICE-6G_C, Peltier 2015
 ]
 
 COLUMN_DOCS = {
     "rates": [
         ("transect_id", "GCTS transect id (Calkoen et al. 2025): stable worldwide"),
         ("country", "ISO 3166-1 alpha-2 code of the transect (GCTS)"),
+        ("unit", "processing unit (a tile of about 30 km cut along the coast): the dashboard's files and links use it"),
         ("rate", "linear rate of shoreline change, m/yr, positive seaward (accretion), negative landward (erosion)"),
         ("rate_lo, rate_hi", "95 % range of the rate (t distribution of the least-squares slope)"),
         ("r2", "coefficient of determination of the linear fit"),
@@ -65,19 +76,6 @@ COLUMN_DOCS = {
          "coastal defences"),
         ("sds_rate, sds_qa", "the Deltares Shoreline Monitor's change rate (m/yr) and its quality flag, from the "
                              "same typology files, for comparison"),
-        ("cvi, cvi_class", "coastal vulnerability index, sqrt(product of the six ranks / 6) (Thieler and "
-                           "Hammar-Klose 1999), and its class: low, moderate, high or very high, the quartiles "
-                           "of the index over the dataset"),
-        ("rank_geomorphology, rank_shoreline_change, rank_coastal_slope, rank_sea_level, rank_waves, rank_tide",
-         "the six ranks, 1 (low vulnerability) to 5 (very high)"),
-        ("coastal_slope_pct", "regional slope across the shore, %: GEBCO 2024 from 5 km offshore to the highest "
-                              "ground within 5 km inland"),
-        ("sea_level_trend_mm_yr, uplift_mm_yr, relative_sea_level_mm_yr",
-         "trend of the sea surface at the nearest sea cell (Copernicus Marine altimetry, its correction for "
-         "glacial isostatic adjustment undone with the ICE-6G_C VM5a geoid rate), vertical land motion of "
-         "glacial isostatic adjustment (ICE-6G_C VM5a), and their difference, mm/yr"),
-        ("mean_tidal_range_m, mean_wave_height_m", "mean daily tidal range (EOT20, one year) and mean significant "
-                                                   "wave height (ERA5), m, of the transect's unit"),
         ("geometry", "the transect (EPSG:4326), from its landward end, along which x is measured"),
     ],
     "shorelines": [
@@ -103,6 +101,22 @@ COLUMN_DOCS = {
     ],
 }
 
+VULNERABILITY_DOCS = [
+    ("cvi, cvi_class", "coastal vulnerability index, sqrt(product of the six ranks / 6) (Thieler and "
+                       "Hammar-Klose 1999), and its class: low, moderate, high or very high, the quartiles "
+                       "of the index over the dataset"),
+    ("rank_geomorphology, rank_shoreline_change, rank_coastal_slope, rank_sea_level, rank_waves, rank_tide",
+     "the six ranks, 1 (low vulnerability) to 5 (very high)"),
+    ("coastal_slope_pct", "regional slope across the shore, %: GEBCO 2024 from 5 km offshore to the highest "
+                          "ground within 5 km inland"),
+    ("sea_level_trend_mm_yr, uplift_mm_yr, relative_sea_level_mm_yr",
+     "trend of the sea surface at the nearest sea cell (Copernicus Marine altimetry, its correction for "
+     "glacial isostatic adjustment undone with the ICE-6G_C VM5a geoid rate), vertical land motion of "
+     "glacial isostatic adjustment (ICE-6G_C VM5a), and their difference, mm/yr"),
+    ("mean_tidal_range_m, mean_wave_height_m", "mean daily tidal range (EOT20, one year) and mean significant "
+                                               "wave height (ERA5), m, of the transect's unit"),
+]
+
 
 def _orient(line, sign: int):
     """The transect from its landward end (``seaward_sign`` +1: stored land to sea)."""
@@ -125,9 +139,9 @@ VULNERABILITY_COLUMNS = ["cvi", "cvi_class", "rank_geomorphology", "rank_shoreli
                          "uplift_mm_yr", "relative_sea_level_mm_yr", "mean_tidal_range_m", "mean_wave_height_m"]
 
 
-def unit_tables(cfg: Config, name: str, method: str = "ceva",
-                index: pd.DataFrame | None = None) -> dict[str, pd.DataFrame] | None:
-    """The three products of one unit, each with the country of every transect; the rates with the
+def unit_tables(cfg: Config, name: str, method: str = "ceva", index: pd.DataFrame | None = None,
+                products: tuple[str, ...] = PRODUCTS) -> dict[str, pd.DataFrame] | None:
+    """The products of one unit, each with the country of every transect; the rates with their unit and the
     vulnerability ``index`` (``ceva.vulnerability.read``) when given."""
     from ceva.transects import typology
 
@@ -137,7 +151,7 @@ def unit_tables(cfg: Config, name: str, method: str = "ceva",
     rates = pd.read_parquet(out / "rates_imagery.parquet")
     shores = gpd.read_parquet(out / "shorelines_imagery.parquet")
     lines = gpd.read_parquet(out / "transects.parquet").set_index("transect_id")
-    water = pd.read_parquet(out / "waterlines.parquet", columns=WATERLINE_COLUMNS)
+    water = pd.read_parquet(out / "waterlines.parquet", columns=WATERLINE_COLUMNS) if "waterlines" in products else None
     ids = sorted(set(rates["transect_id"].astype(str)) | set(shores["transect_id"].astype(str)))
     country = _countries(cfg, ids)
     se = shores.groupby("transect_id")["se_m"].median().rename("se_median_m")
@@ -160,9 +174,11 @@ def unit_tables(cfg: Config, name: str, method: str = "ceva",
     geometry = [_orient(lines["geometry"].get(t), int(lines["seaward_sign"].get(t, 1))) for t in rates["transect_id"]]
     rates = gpd.GeoDataFrame(rates, geometry=geometry, crs=lines.crs)
     shores = shores[["transect_id", "year", "x", "se_m", "n_imagery", "geometry"]]
-    tables = {"rates": rates, "shorelines": shores, "waterlines": water}
+    tables = {k: v for k, v in {"rates": rates, "shorelines": shores, "waterlines": water}.items() if k in products}
     for table in tables.values():
         table.insert(1, "country", table["transect_id"].astype(str).map(country))
+    if "rates" in tables:
+        tables["rates"].insert(2, "unit", name)
     return tables
 
 
@@ -179,59 +195,84 @@ COVERAGE = ("The sand and gravel coasts (Global Coastal Typology) of Europe sout
             "Black Sea and the Sea of Azov but not the Caspian, and of every country around the Mediterranean.")
 
 
-def export(cfg: Config, out: Path, units: list[str], name: str = "ceva-shorelines", version: str = "1.0",
-           method: str = "ceva", place: str = PLACE, coverage: str = COVERAGE) -> dict:
-    """Write the dataset of these units into ``out`` (one file per country and product). Returns its summary.
+def _geo_metadata(schemas: list[pa.Schema]) -> dict:
+    """The GeoParquet metadata of parts written by geopandas, for all of them: bounding box and geometry types."""
+    metas = [json.loads(s.metadata[b"geo"]) for s in schemas]
+    geo = metas[0]
+    column = geo["primary_column"]
+    boxes = [m["columns"][column]["bbox"] for m in metas if m["columns"][column].get("bbox")]
+    if boxes:
+        geo["columns"][column]["bbox"] = [min(b[0] for b in boxes), min(b[1] for b in boxes),
+                                          max(b[2] for b in boxes), max(b[3] for b in boxes)]
+    types = {g for m in metas for g in m["columns"][column]["geometry_types"]}
+    geo["columns"][column]["geometry_types"] = sorted(types)
+    return geo
 
-    ``place`` names the coasts in the titles, ``coverage`` says exactly which transects are in."""
+
+def _concat(files: list[Path], dest: Path) -> int:
+    """One Parquet file from parts, streamed part by part: their columns unified (a column missing from a part,
+    or empty there, takes the type it has elsewhere), and GeoParquet metadata covering them all. Returns rows."""
+    schemas = [pq.read_schema(f) for f in files]
+    schema = pa.unify_schemas([s.remove_metadata() for s in schemas], promote_options="permissive")
+    if all(s.metadata and b"geo" in s.metadata for s in schemas):
+        schema = schema.with_metadata({b"geo": json.dumps(_geo_metadata(schemas)).encode()})
+    rows = 0
+    with pq.ParquetWriter(dest, schema, compression="zstd") as writer:
+        for f in files:
+            part = pq.read_table(f)
+            columns = [part[n].cast(schema.field(n).type) if n in part.column_names
+                       else pa.nulls(part.num_rows, schema.field(n).type) for n in schema.names]
+            writer.write_table(pa.Table.from_arrays(columns, schema=schema))
+            rows += part.num_rows
+    return rows
+
+
+def export(cfg: Config, out: Path, units: list[str], name: str = "ceva-shorelines", version: str = "1.1",
+           method: str = "ceva", place: str = PLACE, coverage: str = COVERAGE,
+           products: tuple[str, ...] = PRODUCTS) -> dict:
+    """Write the dataset of these units into ``out``: rates and yearly shorelines in one file each, the
+    waterlines in one file per country. Returns its summary.
+
+    ``place`` names the coasts in the titles, ``coverage`` says exactly which transects are in; ``products``
+    leaves some out (a light copy: rates and shorelines)."""
+    from ceva import vulnerability
+
     out = Path(out)
     parts = out / ".parts"
     shutil.rmtree(parts, ignore_errors=True)
-    from ceva import vulnerability
-
     done, index = [], vulnerability.read(cfg)
+    counts: dict[str, dict[str, int]] = {}
     for unit in units:
-        tables = unit_tables(cfg, unit, method, index)
+        tables = unit_tables(cfg, unit, method, index, products)
         if tables is None:
             log.warning("%s: no %s results, left out", unit, method)
             continue
         for product, table in tables.items():
-            for cc, g in table.groupby("country", dropna=False):
-                folder = parts / product / (str(cc) if pd.notna(cc) else "XX")
+            country = table["country"].fillna("XX").astype(str)
+            for cc, n in country.value_counts().items():
+                counts.setdefault(cc, dict.fromkeys(PRODUCTS, 0))[product] += int(n)
+            groups = [("", table)] if product in WHOLE else table.groupby(country)
+            for cc, g in groups:
+                folder = parts / product / cc
                 folder.mkdir(parents=True, exist_ok=True)
                 g.reset_index(drop=True).to_parquet(folder / f"{unit}.parquet", index=False)
         done.append(unit)
     if not done:
         raise RuntimeError("no unit has results to export")
-    countries = sorted({p.name for p in (parts / "rates").iterdir()})
-    if 3 * len(countries) + 3 > 100:
-        raise RuntimeError(f"{len(countries)} countries: more files than a Zenodo record holds (100)")
-    counts: dict[str, dict] = {}
+    counts = dict(sorted(counts.items()))
+    countries = list(counts)
+    if len(WHOLE) + len(countries) + 3 > ZENODO_FILES:
+        raise RuntimeError(f"{len(countries)} countries: more files than a Zenodo record holds ({ZENODO_FILES})")
+    for product in (p for p in WHOLE if p in products):
+        _concat(sorted((parts / product).glob("*.parquet")), out / f"{name}_{product}.parquet")
     for cc in countries:
-        counts[cc] = {}
-        for product in PRODUCTS:
-            files = sorted((parts / product / cc).glob("*.parquet")) if (parts / product / cc).exists() else []
-            if not files:
-                continue
-            dest = out / f"{name}_{cc}_{product}.parquet"
-            if product == "waterlines":            # large: streamed, file by file, to one schema
-                schema = pq.read_schema(files[0])
-                with pq.ParquetWriter(dest, schema, compression="zstd") as writer:
-                    rows = 0
-                    for f in files:
-                        table = pq.read_table(f).cast(schema)
-                        writer.write_table(table)
-                        rows += table.num_rows
-            else:
-                table = pd.concat([gpd.read_parquet(f) for f in files], ignore_index=True)
-                table = gpd.GeoDataFrame(table, geometry="geometry", crs=4326)
-                table.to_parquet(dest, index=False, compression="zstd")
-                rows = len(table)
-            counts[cc][product] = rows
+        files = sorted((parts / "waterlines" / cc).glob("*.parquet"))
+        if files:
+            _concat(files, out / f"{name}_{cc}_waterlines.parquet")
     shutil.rmtree(parts)
     summary = {"name": name, "version": version, "created": dt.datetime.now(dt.UTC).isoformat(timespec="seconds"),
                "ceva_version": __version__, "method": method, "units": len(done), "countries": counts,
-               "place": place, "coverage": coverage}
+               "place": place, "coverage": coverage, "vulnerability": index is not None, "products": list(products)}
     (out / "README.md").write_text(readme(summary))
     (out / "metadata.json").write_text(json.dumps(zenodo_metadata(summary), indent=1))
     files = sorted(p for p in out.iterdir() if p.is_file() and p.name != "SHA256SUMS")
@@ -242,28 +283,55 @@ def export(cfg: Config, out: Path, units: list[str], name: str = "ceva-shoreline
 
 def readme(summary: dict) -> str:
     """The dataset's README: what it is, its files and columns, method, validation, limits, licence, citation."""
+    name, index = summary["name"], summary.get("vulnerability", False)
     rows = "\n".join(f"| {cc} | {c.get('rates', 0):,} | {c.get('shorelines', 0):,} | {c.get('waterlines', 0):,} |"
                      for cc, c in summary["countries"].items())
+    products = summary.get("products", PRODUCTS)
+    files = "\n".join(line for product, line in (
+        ("rates", f"* `{name}_rates.parquet` (GeoParquet): one row per transect, for the whole area."),
+        ("shorelines", f"* `{name}_shorelines.parquet` (GeoParquet): one row per transect and year, for the "
+                       "whole area."),
+        ("waterlines", f"* `{name}_CC_waterlines.parquet` (Parquet), one per country `CC` (ISO 3166-1 alpha-2, "
+                       "`XX` where GCTS gives none): one row per image and transect."),
+    ) if product in products)
+    docs = {k: v for k, v in COLUMN_DOCS.items() if k in products}
+    if index and "rates" in docs:
+        docs["rates"] = docs["rates"][:-1] + VULNERABILITY_DOCS + docs["rates"][-1:]
     columns = "\n\n".join(f"**{product}**\n\n| Column | Meaning |\n|---|---|\n" + "\n".join(
-        f"| `{c}` | {m} |" for c, m in COLUMN_DOCS[product]) for product in PRODUCTS)
+        f"| `{c}` | {m} |" for c, m in docs[product]) for product in docs)
     title = f"satellite-derived shorelines of the sand and gravel coasts of {summary['place']}"
-    return f"""# {summary['name']} {summary['version']}: {title}
+    index_line = (" With a coastal vulnerability index of every transect (USGS method)." if index else "")
+    index_step = """
+6. The coastal vulnerability index (Thieler and Hammar-Klose 1999, USGS) ranks six variables from 1 (low) to
+   5 (very high): the landform (Global Coastal Typology), the rate of change, the regional slope (GEBCO 2024,
+   from 5 km offshore to the highest ground within 5 km inland), the relative sea-level rise (the sea-surface
+   trend of Copernicus Marine satellite altimetry minus the land uplift of glacial isostatic adjustment,
+   ICE-6G_C VM5a), the mean ERA5 wave height and the mean EOT20 tidal range. CVI = sqrt(product of the
+   ranks / 6); its classes are the quartiles of the index over the dataset: they compare coasts with each
+   other, they are not a hazard or risk assessment.""" if index else ""
+    index_sources = """ Terrain and bathymetry: GEBCO Compilation Group (2024), GEBCO 2024 Grid,
+doi:10.5285/1c44ce99-0a0d-5f4f-e063-7086abc0ea0f. Sea-level trends: generated using E.U. Copernicus Marine
+Service Information (OMI_CLIMATE_SL_GLOBAL_regional_trends). Glacial isostatic adjustment: ICE-6G_C (VM5a),
+Peltier et al. (2015), doi:10.1002/2014JB011176, grids of Steffen (2021), doi:10.5281/zenodo.5560862,
+CC-BY-4.0.""" if index else ""
+    return f"""# {name} {summary['version']}: {title}
 
 Yearly shoreline positions and rates of change, 1984 to 2025, on the transects of the Global Coastal
 Transect System (one every 100 m along the coast), from every clear Landsat 4–9 and Sentinel-2 image,
-moved to mean sea level with the tide and the waves of each image. Made with CEVA {summary['ceva_version']}
-(method: the CEVA solution), {summary['created'][:10]}. Map and figures: {SITE_URL}
+moved to mean sea level with the tide and the waves of each image.{index_line} Made with CEVA
+{summary['ceva_version']} ({CODE_URL}, method: the CEVA solution), {summary['created'][:10]}. Map and figures:
+{SITE_URL}; the satellite images behind the shorelines: doi:{IMAGES_DOI}.
 
 {summary['coverage']}
 
 ## Files
 
-For each country `CC` (ISO 3166-1 alpha-2): `{summary['name']}_CC_rates.parquet` (GeoParquet, one row per
-transect), `{summary['name']}_CC_shorelines.parquet` (GeoParquet, one row per transect and year) and
-`{summary['name']}_CC_waterlines.parquet` (Parquet, one row per image and transect). `SHA256SUMS` lists
-the checksums. All coordinates are WGS84 (EPSG:4326).
+{files}
 
-| Country | Transects with a rate | Yearly positions | Waterlines |
+`SHA256SUMS` lists the checksums. All coordinates are WGS84 (EPSG:4326); every file has the `country`
+column, so a country is one filter away.
+
+| Country | Transects | Yearly positions | Waterlines |
 |---|---|---|---|
 {rows}
 
@@ -282,7 +350,9 @@ the checksums. All coordinates are WGS84 (EPSG:4326).
    (Vos et al. 2020). Outliers and images at too low a water level are flagged, not removed.
 4. The yearly position is the median of the year's corrected waterlines; the rate is the least-squares
    slope through the yearly positions (at least 5 years), with its 95 % range.
-5. Only transects classed as sand or gravel coasts by the Global Coastal Typology are processed.
+5. Only transects classed as sand or gravel coasts by the Global Coastal Typology are processed.{index_step}
+
+The code, and a notebook that runs every step on one beach: {CODE_URL}.
 
 ## Validation and limits
 
@@ -291,8 +361,9 @@ Australia; Noord-Holland and Walcheren, the Netherlands; Slapton Sands and Perra
 yearly positions were 8 to 39 m from the surveyed ones (root mean square), the largest at the
 macrotidal Perranporth. `se_m` is a precision from the data themselves, not a validated accuracy. Rates
 over a few metres a year, or over many years, are more reliable than any single year. Global tide models
-are weakest in estuaries and lagoons; muddy, rocky and engineered coasts are not covered. This is not an
-official erosion map: national and regional observatories are the reference for planning.
+are weakest in estuaries and lagoons; muddy, rocky and engineered coasts are not covered. The validation
+beaches are all in temperate climates. This is not an official erosion map: national and regional
+observatories are the reference for planning.
 
 ## Licence and attribution
 
@@ -300,7 +371,7 @@ CC-BY-4.0. Contains modified Copernicus Sentinel data (ESA / EU). Landsat imager
 Geological Survey. Derived from the Global Coastal Transect System (doi:10.5281/zenodo.14056925) and the
 Global Coastal Typology (doi:10.5281/zenodo.15607678), Calkoen et al. (2025), CC-BY-4.0. Tides: EOT20,
 Hart-Davis et al. (2021), doi:10.17882/79489, CC-BY-4.0. Waves: ERA5, Hersbach et al. (2020), Copernicus
-Climate Change Service, doi:10.24381/cds.adbb2d47.
+Climate Change Service, doi:10.24381/cds.adbb2d47.{index_sources}
 
 ## How to cite
 
@@ -310,17 +381,21 @@ Cite this record by its DOI, and the sources above.
 
 def zenodo_metadata(summary: dict) -> dict:
     """The metadata of a Zenodo deposit (to review before uploading: creators, affiliations)."""
+    index = summary.get("vulnerability", False)
     return {"metadata": {
-        "title": f"Satellite-derived shorelines of the sand and gravel coasts of {summary['place']}, 1984-2025 "
-                 f"({summary['name']} {summary['version']})",
+        "title": f"Satellite-derived shorelines of the sand and gravel coasts of {summary['place']}, 1984-2025"
+                 + (", with a coastal vulnerability index" if index else "")
+                 + f" ({summary['name']} {summary['version']})",
         "upload_type": "dataset",
         "description": ("<p>Yearly shoreline positions and rates of change from Landsat 4-9 and Sentinel-2, corrected "
-                        "for tide and waves, on the transects of the Global Coastal Transect System. "
-                        f"{summary['coverage']} GeoParquet and Parquet files by country; see README.md "
-                        "for the columns, the method, its validation and its limits.</p>"),
+                        "for tide and waves, on the transects of the Global Coastal Transect System"
+                        + (", and the coastal vulnerability index of each transect (USGS method)" if index else "")
+                        + f". {summary['coverage']} Rates and yearly shorelines in one GeoParquet file each, "
+                        "waterlines in one Parquet file per country; see README.md for the columns, the method, its "
+                        f"validation and its limits. Made with CEVA: <a href=\"{CODE_URL}\">{CODE_URL}</a>.</p>"),
         "creators": [{"name": "Lacrouts, Clément"}],
         "keywords": ["shoreline", "coastal erosion", "satellite-derived shoreline", "Landsat", "Sentinel-2",
-                     "Europe", "Mediterranean", "GCTS"],
+                     "Europe", "Mediterranean", "GCTS"] + (["coastal vulnerability index"] if index else []),
         "license": "cc-by-4.0", "version": summary["version"], "access_right": "open",
         "related_identifiers": RELATED,
         "notes": f"Made with CEVA {summary['ceva_version']} ({summary['method']}) on {summary['created'][:10]}.",

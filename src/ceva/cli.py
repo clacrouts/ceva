@@ -704,17 +704,24 @@ def export(
     run: Annotated[Optional[str], typer.Option(help="Export the finished units of these batch runs "
                                                     "(names separated by commas).")] = None,
     units: Annotated[Optional[str], typer.Option(help="And/or these units or regions, separated by commas.")] = None,
-    version: Annotated[str, typer.Option(help="Version of the dataset.")] = "1.0",
+    version: Annotated[str, typer.Option(help="Version of the dataset.")] = "1.1",
     name: Annotated[str, typer.Option(help="File name prefix.")] = "ceva-shorelines",
     place: Annotated[Optional[str], typer.Option(help="The coasts, as named in the titles.")] = None,
     coverage: Annotated[Optional[str], typer.Option(help="Which transects are in, in one sentence.")] = None,
+    products: Annotated[str, typer.Option(help="Products written, separated by commas (rates, shorelines, "
+                                                 "waterlines); rates,shorelines makes a light copy.")]
+    = "rates,shorelines,waterlines",
 ) -> None:
     """Write the full dataset for download and citation: rates, yearly shorelines and waterlines by country."""
     from ceva import export as exp
 
     cfg = load_config()
     names, _ = _run_units(cfg, run, units)
-    summary = exp.export(cfg, out, names, name, version, place=place or exp.PLACE, coverage=coverage or exp.COVERAGE)
+    chosen = tuple(p.strip() for p in products.split(",") if p.strip())
+    if not chosen or set(chosen) - set(exp.PRODUCTS):
+        raise typer.BadParameter(f"products: choose from {', '.join(exp.PRODUCTS)}")
+    summary = exp.export(cfg, out, names, name, version, place=place or exp.PLACE, coverage=coverage or exp.COVERAGE,
+                         products=chosen)
     size = sum(p.stat().st_size for p in Path(out).iterdir() if p.is_file())
     typer.echo(f"{summary['units']} units, {len(summary['countries'])} countries, {size / 1e9:.2f} GB: {out}")
 

@@ -38,6 +38,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+assistant = ["mcp>=2.3,<3", "openai>=1.40", "uvicorn>=0.30", "starlette", "httpx"]
 coastsat = ["coastsat-package==0.5.1"]   # the CoastSat engine; install with --no-deps, see environment.yml
 
 [project.scripts]

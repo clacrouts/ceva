@@ -59,29 +59,58 @@ def test_units_become_tiles_series_summary_and_manifest(results, tmp_path):
     assert {g[4:8] for g in map(tuple, stats["groups"])} == {(1, 0, 0, 0)}     # significant, natural, se 3 m
 
 
-def test_the_dataset_has_three_products_per_country_and_its_documentation(results, tmp_path):
+def _waterlines(cfg, unit, ids):
+    pd.DataFrame({"transect_id": ids, "time": pd.to_datetime(["2001-06-01"] * len(ids)),
+                  "platform": "landsat-7", "family": "landsat", "x_obs": 100.0, "tide": 0.5, "wave": 0.1,
+                  "level": 0.6, "x_corr": 104.0, "threshold": 0.1, "outlier": False, "low_water": False,
+                  "use": True}).to_parquet(cfg.data_dir / "results" / unit / "ceva" / "waterlines.parquet")
+
+
+def test_the_dataset_has_rates_and_shorelines_whole_and_waterlines_by_country(results, tmp_path):
+    import shutil
+
+    import pyarrow.parquet as pq
+
     from ceva import export
 
+    _waterlines(results, "u1", ["a", "b"])
+    # a second unit in another country, without a coastal type: columns empty there, a wider bounding box
+    u1, u2 = (results.data_dir / "results" / u / "ceva" for u in ("u1", "u2"))
+    shutil.copytree(u1, u2)
+    for name in ("transects", "shorelines_imagery"):
+        g = gpd.read_parquet(u2 / f"{name}.parquet")
+        g["transect_id"] = g["transect_id"].map({"a": "c", "b": "d"})
+        g.geometry = g.geometry.translate(xoff=3.0)
+        g.to_parquet(u2 / f"{name}.parquet")
+    rates = pd.read_parquet(u2 / "rates_imagery.parquet").assign(transect_id=["c", "d"])
+    rates.to_parquet(u2 / "rates_imagery.parquet")
+    _waterlines(results, "u2", ["c", "d"])
+    pd.DataFrame({"transect_id": ["a", "b", "c", "d"], "country": ["FR", "FR", "ES", "ES"],
+                  "common_country_name": ["France", "France", "Spain", "Spain"]}).to_parquet(tmp_path / "gcts.parquet")
+
     out = tmp_path / "zenodo"
-    w = out.parent / "w.parquet"
-    pd.DataFrame({"transect_id": ["a", "b"], "time": pd.to_datetime(["2001-06-01", "2001-06-01"]),
-                  "platform": "landsat-7", "family": "landsat", "x_obs": [100.0, 101.0], "tide": 0.5, "wave": 0.1,
-                  "level": 0.6, "x_corr": [104.0, 105.0], "threshold": 0.1, "outlier": False, "low_water": False,
-                  "use": True}).to_parquet(results.data_dir / "results" / "u1" / "ceva" / "waterlines.parquet")
-    summary = export.export(results, out, ["u1"], version="0.1")
+    summary = export.export(results, out, ["u1", "u2"], version="0.1")
     names = sorted(p.name for p in out.iterdir())
-    assert names == ["README.md", "SHA256SUMS", "ceva-shorelines_FR_rates.parquet",
-                     "ceva-shorelines_FR_shorelines.parquet", "ceva-shorelines_FR_waterlines.parquet",
-                     "metadata.json"]
-    assert summary["countries"]["FR"] == {"rates": 2, "shorelines": 20, "waterlines": 2}
-    rates = gpd.read_parquet(out / "ceva-shorelines_FR_rates.parquet").set_index("transect_id")
+    assert names == ["README.md", "SHA256SUMS", "ceva-shorelines_ES_waterlines.parquet",
+                     "ceva-shorelines_FR_waterlines.parquet", "ceva-shorelines_rates.parquet",
+                     "ceva-shorelines_shorelines.parquet", "metadata.json"]
+    assert summary["countries"] == {"ES": {"rates": 2, "shorelines": 20, "waterlines": 2},
+                                    "FR": {"rates": 2, "shorelines": 20, "waterlines": 2}}
+    rates = gpd.read_parquet(out / "ceva-shorelines_rates.parquet").set_index("transect_id")
     assert rates.loc["a", "change_class"] == "intense_erosion" and bool(rates.loc["a", "significant"])
     assert list(rates.loc["b", "geometry"].coords)[0] == (-1.25, 44.71)       # from the landward end
-    assert rates.loc["a", "sds_rate"] == -1.5
+    assert rates.loc["a", "sds_rate"] == -1.5 and pd.isna(rates.loc["c", "sds_rate"])
+    assert rates.loc["c", "country"] == "ES"
+    geo = json.loads(pq.read_schema(out / "ceva-shorelines_shorelines.parquet").metadata[b"geo"])
+    west, _, east, _ = geo["columns"]["geometry"]["bbox"]
+    assert west == pytest.approx(-1.26) and east == pytest.approx(1.74)       # both units
+    assert len(gpd.read_parquet(out / "ceva-shorelines_shorelines.parquet")) == 40
     meta = json.loads((out / "metadata.json").read_text())["metadata"]
     assert meta["license"] == "cc-by-4.0" and meta["version"] == "0.1"
+    assert {"identifier": export.CODE_URL, "relation": "isCompiledBy", "scheme": "url"} in meta["related_identifiers"]
     assert "ceva-shorelines_FR_waterlines.parquet" in (out / "SHA256SUMS").read_text()
-    assert not w.exists() and not (out / ".parts").exists()
+    assert "ceva-shorelines_rates.parquet" in (out / "README.md").read_text()
+    assert not (out / ".parts").exists()
 
 
 def test_the_coast_not_measured_is_drawn_as_runs_of_one_kind():
@@ -127,10 +156,7 @@ def test_the_vulnerability_index_goes_to_the_cards_the_summary_and_the_dataset(r
         assert card["r"] == [5, 4, 4, 5, 5, 3] and card["slope"] == 0.4 and card["rsl"] == 3.5
         block = json.loads((out / "summary.json").read_text())["countries"]["FR"]["vulnerability"]
         assert block == {"known": 2, "classes": [1, 0, 0, 1], "median": 16.45}
-    pd.DataFrame({"transect_id": ["a"], "time": pd.to_datetime(["2001-06-01"]), "platform": "landsat-7",
-                  "family": "landsat", "x_obs": [100.0], "tide": 0.5, "wave": 0.1, "level": 0.6, "x_corr": [104.0],
-                  "threshold": 0.1, "outlier": False, "low_water": False, "use": True}
-                 ).to_parquet(results.data_dir / "results" / "u1" / "ceva" / "waterlines.parquet")
+    _waterlines(results, "u1", ["a"])
     export.export(results, tmp_path / "zenodo", ["u1"], version="0.1")
-    rates = gpd.read_parquet(tmp_path / "zenodo" / "ceva-shorelines_FR_rates.parquet").set_index("transect_id")
+    rates = gpd.read_parquet(tmp_path / "zenodo" / "ceva-shorelines_rates.parquet").set_index("transect_id")
     assert rates.loc["a", "cvi_class"] == "very_high" and rates.loc["b", "rank_coastal_slope"] == 1
