@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "name": "europe-mediterranean",
+  "description": "Europe south of the Arctic circle (66.5626 N), with the Black Sea and the Sea of Azov but not the Caspian, and every coast of the Mediterranean basin. Each polygon keeps the transects of one GCTS continent file, so that a box around a sea takes one side of it only.",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"name": "Europe south of the Arctic circle, Macaronesia, Black Sea and Azov; east of 44 E only north of 50 N (White Sea), so not the Caspian", "continents": ["EU"]},
+      "geometry": {"type": "Polygon", "coordinates": [[[-33, 26], [44, 26], [44, 50], [46.5, 50], [46.5, 66.5626], [-33, 66.5626], [-33, 26]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Mediterranean coasts of Africa, from the Strait of Gibraltar to Sinai; not the Atlantic, the Suez Canal or the Red Sea", "continents": ["AF"]},
+      "geometry": {"type": "Polygon", "coordinates": [[[-5.6, 30], [32.0, 30], [32.0, 31.22], [32.65, 31.22], [32.65, 30], [34.4, 30], [34.4, 38], [-5.6, 38], [-5.6, 30]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"name": "Mediterranean coasts of Asia (Cyprus, the Levant, Sinai) and the Black Sea coast of Georgia; not the Red Sea or the Caspian", "continents": ["AS"]},
+      "geometry": {"type": "Polygon", "coordinates": [[[25, 30], [42, 30], [42, 47.5], [25, 47.5], [25, 30]]]}
+    }
+  ]
+}

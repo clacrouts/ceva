@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ceva"
+version = "1.1.0"
+description = "Worldwide satellite-derived shoreline change and coastal vulnerability pipeline"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+dependencies = [
+    "numpy>=2",
+    "pandas>=2.2",
+    "pyarrow",
+    "geopandas",
+    "shapely>=2",
+    "pyproj",
+    "scipy",
+    "mercantile",
+    "pystac-client",
+    "planetary-computer",
+    "pydantic>=2",
+    "pyyaml",
+    "typer",
+    "python-dotenv",
+    "requests",
+    "rasterio",
+    "xarray",
+    "zarr>=3.1",
+    "icechunk>=2",
+    "eo-tides>=0.10",
+    "scikit-image",
+    "plotly",
+    "netCDF4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff"]
+coastsat = ["coastsat-package==0.5.1"]   # the CoastSat engine; install with --no-deps, see environment.yml
+
+[project.scripts]
+ceva = "ceva.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"ceva.config" = ["*.yaml", "regions/*.yaml", "areas/*.geojson"]
+"ceva.validation" = ["*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["network: needs internet access (deselected by default)"]
+addopts = "-m 'not network'"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["UP045"]   # typer needs Optional[...] in command signatures

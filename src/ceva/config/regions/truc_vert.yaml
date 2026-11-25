@@ -1,0 +1,7 @@
+region:
+  name: truc_vert
+  description: >-
+    Truc Vert beach, Gironde coast, France. Validation site with long-term in-situ
+    topographic surveys; one of the SDS benchmark sites (Vos et al. 2023).
+  bbox_wgs84: [-1.32, 44.66, -1.20, 44.80]
+  continent: Europe

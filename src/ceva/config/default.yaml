@@ -1,0 +1,285 @@
+# CEVA worldwide defaults. A region file (config/regions/<name>.yaml, or any path)
+# is deep-merged on top of this, then CEVA_* environment variables are applied.
+# Nothing here is specific to one coast.
+
+# Where downloaded and derived data live. CEVA_DATA_DIR overrides it;
+# null falls back to ./ceva-data.
+data_dir: null
+
+grid:
+  # Processing tiles are Bing-scheme quadkeys. Every transect is indexed by the
+  # zoom-12 quadkey of its origin, so a zoom-10 tile is the 10-character prefix
+  # of the transects inside it. Zoom 10 is ~39 km wide at the equator, ~28 km at 45°.
+  # (The `quadkey` column shipped with GCTS is not that key and is not used.)
+  processing_zoom: 10
+  # Imagery is read this far beyond the tile edge, so a transect near the edge
+  # still sees the full scene around it. Each transect belongs to exactly one
+  # tile (the one containing its origin) and is never cut by a tile edge.
+  tile_buffer_m: 2000
+
+transects:
+  source: gcts
+  gcts:
+    release: "2024-08-02"
+    zenodo_record: 14056925
+    licence: CC-BY-4.0
+    attribution: >-
+      Global Coastal Transect System (GCTS), Calkoen et al. (2025), Deltares / TU Delft,
+      doi:10.5281/zenodo.14056925, CC-BY-4.0. Derived from OpenStreetMap coastlines.
+  # Sediment type, geomorphology, built-up and defended coasts of every GCTS transect (deep learning)
+  typology:
+    zenodo_record: 15607678
+    licence: CC-BY-4.0
+    attribution: >-
+      Global Coastal Typology, Calkoen et al. (2025), "A global 100 m coastal typology derived from
+      satellite data using deep learning", doi:10.5281/zenodo.15607678, CC-BY-4.0.
+
+providers:
+  planetary_computer:
+    stac_url: https://planetarycomputer.microsoft.com/api/stac/v1
+  earth_search:
+    stac_url: https://earth-search.aws.element84.com/v1
+  cdse:
+    stac_url: https://stac.dataspace.copernicus.eu/v1
+    s3_endpoint: eodata.dataspace.copernicus.eu
+    # Copernicus General users: 4 concurrent S3 connections, 20 MB/s each, 2000 requests a minute,
+    # 12 TB per rolling 30 days (https://documentation.dataspace.copernicus.eu/Quotas.html)
+    max_connections: 4
+    # Units on one tile read each Level-1C file in turn, sharing its blocks: the 12 TB per 30 days
+    # and 2000 requests a minute bind before the bandwidth does.
+    share_files: cache
+    gdal:
+      # The size of GDAL's HTTP requests is process-wide (ceva.reader); set here it only applied when
+      # a file of this provider happened to be the first one read.
+      GDAL_INGESTED_BYTES_AT_OPEN: "300000"
+      # The JPEG 2000 driver decodes with its own threads by default; with several files read
+      # in parallel that returns corrupt pixels (GDAL 3.13, OpenJPEG 2.5). One thread per read.
+      GDAL_NUM_THREADS: "1"
+  usgs:                        # Landsat Collection 2 Level-1; files need an ERS account with M2M download access
+    stac_url: https://landsatlook.usgs.gov/stac-server
+    m2m_url: https://m2m.cr.usgs.gov/api/api/json/stable/
+
+sensors:
+  landsat:
+    # Earth Search's Landsat assets are requester-pays, so Planetary Computer only.
+    providers: [planetary_computer]
+    toa_providers: [usgs]
+    platforms: [landsat-4, landsat-5, landsat-7, landsat-8, landsat-9]
+    collection_categories: [T1]
+    resolution_m: 30
+    max_scene_cloud_cover: 90   # coarse pre-filter; pixels are masked individually
+  sentinel2:
+    # First provider that is usable wins. Planetary Computer serves Level-2A as cloud-optimised
+    # GeoTIFFs with no connection limit; CDSE has the complete archive at one processing
+    # baseline (05.xx, reprocessed) but allows 4 connections, which the Level-1C reads need.
+    providers: [planetary_computer, cdse, earth_search]
+    toa_providers: [cdse]      # Level-1C, reprocessed to baseline 05.xx; needs S3 keys
+    platforms: [sentinel-2a, sentinel-2b, sentinel-2c]
+    resolution_m: 10
+    max_scene_cloud_cover: 90
+
+masking:
+  # QA_PIXEL bits: 0 fill, 1 dilated cloud, 2 cirrus (OLI only), 3 cloud,
+  # 4 cloud shadow, 5 snow. Bit 7 (water) is informative and never dropped.
+  landsat_qa_drop_bits: [0, 1, 2, 3, 4, 5]
+  # SCL: 0 no data, 1 saturated/defective, 9 cloud high probability, 10 thin cirrus.
+  # As in CoastSat, shadow (3), cloud medium probability (8) and snow (11) are kept:
+  # Sen2Cor gives 8 and 11 to dry sand and white water. Validation: 1.7-3x as many usable
+  # Sentinel-2 images at Truc Vert and Narrabeen with equal or better accuracy. The same
+  # relaxation for Landsat (no shadow or snow bits) made Truc Vert worse, so Landsat keeps them.
+  s2_scl_drop_classes: [0, 1, 9, 10]
+
+cube:
+  spacing_m: 10          # distance between samples along a transect
+  bands: [green, swir1]  # what MNDWI needs; add bands here to store more
+  workers: 16            # parallel image reads
+
+# Small 2D images around the transects, for the CoastSat engine, which classifies pixels
+# using their neighbours and maps the shoreline as a 2D contour. Read only when needed.
+chips:
+  margin_m: 300          # around the bounding box of the transects
+  pixel_m:               # CoastSat's grids: Landsat at 15 m, Sentinel-2 at 10 m
+    landsat: 15
+    sentinel2: 10
+  # Reflectance of the chip bands: toa (Level-1, top of atmosphere, what CoastSat's classifier was
+  # trained on) or surface (Level-2). The cloud mask comes from the Level-2 product either way.
+  # When a family's top-of-atmosphere source cannot be used (no account, no access), its chips
+  # fall back to surface reflectance, with a warning, and the chips record which they hold.
+  reflectance:
+    landsat: toa
+    sentinel2: toa
+  bands: [blue, green, red, nir, swir1]   # what CoastSat's classifier uses, in this order
+  workers: 16            # parallel image reads
+  segment_km: 3          # long coasts are cut into chips of at most this alongshore length
+  detect_workers: 12     # parallel processes for the shoreline detection
+  # Acquisitions that CoastSat would skip as too cloudy (cloud_thresh) over every segment are not
+  # downloaded: their Level-2 quality band is read first. Segments too cloudy are not stored.
+  skip_cloudy: true
+
+tides:
+  model: EOT20                 # CC-BY, no registration (Hart-Davis et al. 2021)
+  reference_elevation_m: 0.0   # shorelines are reported at this height above mean sea level
+
+# Wave-driven water level added to the tide before moving waterlines to the reference
+# elevation. ERA5 waves are read at a point offshore of each unit.
+waves:
+  # ERA5 ocean waves: cds_era5 (downloaded once from the Copernicus Climate Data Store and read locally:
+  # `ceva waves download` then `ceva waves build`), open_meteo_era5 (the same data through the Open-Meteo
+  # API: no account, but non-commercial and refused at continental scale), or none
+  source: cds_era5
+  cds:
+    # north, west, south, east: Europe south of the Arctic circle and the Mediterranean basin (Azores to the
+    # Black Sea, Iceland to Libya), with 1 degree to spare
+    area: [68, -33, 26.5, 45]
+    variables: [hs]            # significant wave height (all the correction uses); also tp, direction
+    coastal_reach_cells: 3     # sea cells kept: within 1.5 degrees of land
+  component: empirical         # empirical (fitted to surveys) or none (tide only)
+  offshore_distance_m: 20000   # wave point this far seaward of the transect ends
+  # empirical: extra height of the satellite waterline when waves are above their usual height,
+  # hs_coef * (Hs - mean Hs of the transect), per detection engine. Fitted with `ceva calibrate-waterline`
+  # on the six validation beaches, with the search window that follows the tide (and, for CoastSat,
+  # top-of-atmosphere Sentinel-2). Fitted on five beaches, it improves the sixth in 12 of 12 cases.
+  # Each beach's mean offset is not modelled: with six beaches, no descriptor predicts it reliably.
+  empirical:
+    hs_coef:
+      ceva: 0.48
+      coastsat: 0.37
+    fitted_on: "trucvert, narrabeen, jarkus, walcheren, slapton, perranporth (2026-11-12)"
+
+# Annual shorelines, after DEA Coastlines (Bishop-Taylor et al. 2021): median MNDWI of
+# the observations taken near mean sea level, then the sub-pixel crossing of a threshold.
+annual:
+  threshold: otsu              # otsu (per composite, on samples near the shoreline) or fixed
+  index_threshold: 0.0         # the fixed threshold, and the first guess for otsu
+  otsu_window_m: 150           # samples within this distance of the first-guess shoreline feed otsu
+  tide_central_fraction: 0.5   # keep tides within the central half of the observed range
+  min_observations: 5          # below this, neighbouring years are added
+  gapfill_years: 1
+  min_land_run_m: 50           # land patches shorter than this, seaward of the beach, are ignored
+
+# Per-image waterlines, after CoastSat (Vos et al. 2019): one waterline per image,
+# moved to the reference elevation with the total water level and the beach slope.
+perimage:
+  engine: ceva                 # ceva (CEVA: MNDWI along each transect; the production method) or coastsat
+                               # (CoastSat: 2D, pixel classifier; kept for comparison at the validation sites)
+  threshold: otsu              # otsu (per image, near the annual shoreline) or fixed
+  index_threshold: 0.0
+  # Search window (both engines): this far either side of that year's composite shoreline, moved
+  # with the tide of the image along a curve measured on composites of images binned by tide, so
+  # the window follows the waterline across a flat, macrotidal beach.
+  max_dist_ref_m: 150
+  tide_stage_bins: 8           # groups of equal size, by tide, over the whole record
+  tide_stage_min_obs: 10       # fewer images in a group: no point on the curve there
+  min_valid_fraction: 0.8      # of the samples in the window; rejects cloud-edge observations
+  slope_method: spectral       # spectral (Vos et al. 2020) or regression
+  default_slope: 0.05          # tan(beta) when it cannot be estimated
+  slope_bounds: [0.01, 0.3]
+  min_total_water_level_m: null  # drop images taken below this water level (Castelle et al. 2021)
+  outlier_mad_k: 3.0
+
+# The CoastSat engine (coastsat-package, Vos et al. 2019): a neural network labels pixels
+# sand / white water / water / other, Otsu separates the MNDWI of the sand and water
+# pixels only, and the shoreline is that contour. Values are CoastSat's defaults, except
+# the reference shoreline: CEVA draws it automatically through that year's annual
+# shoreline on each transect, instead of digitising it by hand.
+coastsat:
+  sand_color: default          # classifier: default, latest, dark or bright sand
+  max_dist_ref_m: 150          # buffer around the reference shoreline (CoastSat: 100)
+  reference_extend_m: 300      # reference line extended this far beyond the end transects
+  min_beach_area_m2: 1000      # smaller sand or water patches are dropped
+  min_length_sl_m: 500         # shorter contours are dropped (200 m for Landsat 7)
+  cloud_thresh: 0.5            # images with more cloud than this, over the chip, are skipped
+  # CoastSat's own cloud mask, which is lighter than CEVA's: Landsat QA_PIXEL dilated cloud,
+  # cirrus and cloud (no shadow, no snow). For Sentinel-2, cloud high probability and thin
+  # cirrus from the scene classification (CoastSat reads QA60 + s2cloudless, which Level-2A
+  # does not carry); "medium probability" is left out because Sen2Cor gives it to dry sand.
+  # Cloud patches smaller than min_cloud_pixels are dropped: on beaches they are white water or sand.
+  landsat_cloud_bits: [1, 2, 3]
+  s2_cloud_classes: [9, 10]
+  min_cloud_pixels: 40
+  cloud_mask_issue:            # CoastSat's fix for bright sand flagged as cloud: drop thin linear "clouds"
+    landsat: false
+    sentinel2: true
+  dist_clouds_m: 300           # no shoreline points this close to a cloud
+  along_dist_m: 25             # shoreline points this close to a transect form its intersection
+  min_points: 3
+  max_std_m: 15
+  max_range_m: 30
+  min_chainage_m: -100
+  multiple_inter: auto
+  prc_multiple: 0.1
+
+# Radar (synthetic aperture radar): waterlines in any weather, aligned on the imagery.
+sar:
+  # Off by default: the products are imagery only. Set to true to read Sentinel-1, align its waterlines
+  # on the imagery and add the imagery + radar product (validated, see the README).
+  enabled: false
+  missions: [sentinel1]        # nisar to follow
+  workers: 16                  # parallel reads
+  block_bytes: 2147483648      # chips held in memory before they are written
+  # CoastSat solution: CoastSat's SAR land/water model (U-Net, weights CC0, trained on Sentinel-1
+  # sigma nought in dB) or its Otsu fallback on mean(VV, VH)
+  detection: model
+  water_threshold: 0.5
+  # CEVA solution: mean(VV, VH) in dB along each transect (median-filtered against speckle). How a
+  # waterline looks in radar is learned from the imagery: for each transect, orbit direction and
+  # wave class, the median radar profile around the imagery's waterline is a template; each radar
+  # profile is then matched to it within the search window.
+  smoothing_px: 3
+  template:
+    half_width_m: 300          # the template spans the beach, the waterline and the surf zone
+    search_m: 100              # either side of the expected waterline (yearly shoreline moved with the tide)
+    step_m: 5
+    wave_classes: 3            # calm, moderate, rough (terciles of the wave level)
+    min_learn: 20
+    min_valid: 0.7
+    min_score: 0.3
+  # Combined yearly positions: imagery and radar yearly medians weighted by their precision,
+  # counting at most this many independent observations a year in each
+  effective_per_year: 12
+  calibration:
+    window_days: 30            # imagery positions within this many days give each radar waterline's reference
+    min_imagery: 3
+    min_pairs: 20              # per transect and orbit direction; fewer pairs: the unit's value
+    terms: [hs, tide]          # also fitted: metres per metre of wave height and of tide
+    per_year: false            # also remove a unit-wide offset per year (radar drift between years)
+    outlier_mad_k: 3.0
+  sentinel1:
+    provider: planetary_computer
+    collection: sentinel-1-rtc # gamma nought, terrain corrected, 10 m; CC BY 4.0 (Catalyst), Copernicus data
+    pixel_m: 10
+    start: 2014-10-01
+    nodata: -32768
+    incidence_deg: 38          # mid-swath; gamma nought -> sigma nought for CoastSat's model
+
+time:
+  start: 1984-01-01
+  end: 2025-12-31
+
+# Online storage of finished units (``ceva batch run``): any S3-compatible bucket. Its endpoint, name
+# and keys go in ~/.config/ceva/tokens/storage.env (STORAGE_ENDPOINT_URL, STORAGE_BUCKET,
+# STORAGE_ACCESS_KEY_ID, STORAGE_SECRET_ACCESS_KEY); for a Cloudflare R2 bucket kept in the EU the
+# endpoint is https://<account id>.eu.r2.cloudflarestorage.com.
+storage:
+  prefix: ceva
+  region: auto                 # R2; the bucket's region for other providers
+  keep_local: false            # delete the local copy once uploaded and checked
+  local_budget_gb: 40          # with online storage: most waiting locally for an upload
+  # Without online storage (no storage.env), units stay in the data directory. The disk is shared:
+  min_free_gb: 150             # pause while it has less free than this
+  keep_cubes_above_gb: 300     # keep each unit's cube (to reprocess without downloading) only while more is free
+
+batch:
+  max_transects: 300           # a tile with more is cut along the coast, so that its cube fits in memory
+  max_consecutive_failures: 5  # then the run pauses 10, 20, 40, 80 minutes (rate limits), then stops
+  # Coasts processed, by Global Coastal Typology sediment class (empty: all). Shorelines move on sand and
+  # gravel beaches, which all six validation sites are; mud (marshes, tidal flats) is not validated yet,
+  # and rock or bare platforms barely move.
+  shore_types: [sandy_gravel_or_small_boulder_sediments]
+  # Several workers (ceva batch run --workers N) on a machine shared with other users. A unit's cube
+  # is assembled in memory (up to ~30 GB for the largest units), so the workers together keep within
+  # a budget; a worker starts a unit only while the machine keeps min_free_memory_gb available for
+  # everyone else. Each worker reads fewer images at once than a single run (cube.workers).
+  memory_budget_gb: 30
+  min_free_memory_gb: 16
+  worker_reads: 8

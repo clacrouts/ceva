@@ -1,0 +1,28 @@
+# Credentials — never commit these. CEVA reads its token files from ~/.config/ceva/tokens/,
+# outside the repository; these patterns catch copies made by mistake.
+*service-account*.json
+*.key.json
+.env
+*.env
+tokens/
+*.token
+credentials*.json
+.copernicusmarine/
+.config/earthengine/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Local settings, data and build artefacts
+ceva-data/
+*.part
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/

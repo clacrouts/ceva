@@ -1,0 +1,91 @@
+# CEVA: worldwide satellite-derived shoreline pipeline.
+#
+# Create:
+#   mamba env create -p /path/to/envs/ceva -f environment.yml
+#   conda activate /path/to/envs/ceva
+#   pip install --no-deps -e .
+# With a small home quota, set CONDA_PKGS_DIRS to a folder on a larger disk first.
+#
+# Python is pinned to 3.12: icechunk 2.x needs >=3.12 and coastseg needs <3.13.
+name: ceva
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+
+  # Arrays, dataframes, parallelism
+  - numpy>=2
+  - pandas>=2.2
+  - xarray
+  - dask
+  - distributed
+  - pyarrow
+  - python-duckdb
+
+  # Geospatial I/O and geometry
+  - rasterio
+  - libgdal-jp2openjpeg   # JP2 driver: Copernicus Data Space serves Sentinel-2 as JPEG2000
+  - rioxarray
+  - geopandas
+  - pyogrio
+  - shapely>=2
+  - pyproj>=3.7
+  - mercantile            # quadkey tiling (Bing tile scheme, same as GCTS partitions)
+
+  # STAC access
+  - pystac-client
+  - odc-stac
+  - odc-geo
+  - planetary-computer
+  - botocore
+
+  # Tides (eo-tides requires pyTMD < 3)
+  - pytmd>=2.2.8,<3
+  - timescale
+  - h5netcdf
+  - netcdf4
+
+  # Storage
+  - zarr>=3.1
+  - icechunk>=2
+
+  # Image processing / ML used by the extraction engines
+  - scikit-image>=0.25
+  - scipy>=1.14.1
+  - scikit-learn>=1.4
+  # CoastSat engine. coastsat-package itself is installed with pip --no-deps (below); these
+  # are what its modules import, including GDAL's Python bindings and the Earth Engine
+  # client, which CEVA never calls but CoastSat imports at load time.
+  - onnxruntime
+  - astropy>=7.1          # 6.x fails to import with numpy >= 2.4
+  - imageio
+  - joblib
+  - pooch
+  - pytz
+  - gdal                  # Python bindings, same version as rasterio's libgdal
+  - earthengine-api
+  - google-auth
+
+  # Application plumbing
+  - pydantic>=2
+  - pyyaml
+  - typer
+  - python-dotenv
+  - requests
+  - tqdm
+  - psutil
+  - colorama
+  - matplotlib
+  - plotly
+  - greenlet
+  - pyee
+
+  # Development
+  - pytest
+  - ruff
+
+  - pip
+  - pip:
+      - eo-tides>=0.10
+# Then, without dependencies (they are all above):
+#   pip install --no-deps "coastsat-package==0.5.1"

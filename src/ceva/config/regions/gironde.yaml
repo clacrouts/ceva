@@ -1,0 +1,6 @@
+region:
+  name: gironde
+  description: Gironde estuary mouth (Royan, Pointe de la Coubre, Le Verdon), Bay of Biscay, France
+  # lon_min, lat_min, lon_max, lat_max (WGS84)
+  bbox_wgs84: [-1.279822, 45.373822, -0.723581, 45.693203]
+  continent: Europe

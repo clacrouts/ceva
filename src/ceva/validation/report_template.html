@@ -1,0 +1,618 @@
+<title>CEVA shoreline validation</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column of text, charts allowed to run wider; a sticky site switcher. */
+:root {
+  --bg: #f7f8f8; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --rule: #dcdcd6; --note: #eef3f9;
+  --landsat: #2a78d6; --s2: #eb6834; --composite: #1baf7a; --perimage: #6250d6;
+  --before: #898781; --after: #1baf7a; --runup: #6250d6; --team: #2a78d6;
+  --v1: #1baf7a; --v2: #eda100; --v3: #2a78d6; --v4: #e87ba4; --v5: #008300;
+  --siteA: #2a78d6; --siteB: #eb6834; --siteC: #1baf7a; --siteD: #eda100; --siteE: #e87ba4; --siteF: #008300;
+  --erode: #e34948; --accrete: #2a78d6; --mid: #f0efec;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --rule: #2c2c2a; --note: #16202b;
+  --landsat: #3987e5; --s2: #d95926; --composite: #199e70; --perimage: #9085e9;
+  --before: #898781; --after: #199e70; --runup: #9085e9; --team: #3987e5;
+  --v1: #199e70; --v2: #c98500; --v3: #3987e5; --v4: #d55181; --v5: #008300;
+  --siteA: #3987e5; --siteB: #d95926; --siteC: #199e70; --siteD: #c98500; --siteE: #d55181; --siteF: #008300;
+  --erode: #e66767; --accrete: #3987e5; --mid: #383835; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --rule: #2c2c2a; --note: #16202b;
+  --landsat: #3987e5; --s2: #d95926; --composite: #199e70; --perimage: #9085e9;
+  --before: #898781; --after: #199e70; --runup: #9085e9; --team: #3987e5;
+  --v1: #199e70; --v2: #c98500; --v3: #3987e5; --v4: #d55181; --v5: #008300;
+  --siteA: #3987e5; --siteB: #d95926; --siteC: #199e70; --siteD: #c98500; --siteE: #d55181; --siteF: #008300;
+  --erode: #e66767; --accrete: #3987e5; --mid: #383835; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1 { font-size: 28px; font-weight: 600; margin: 0 0 6px; text-wrap: balance; letter-spacing: -0.01em; }
+h2 { font-size: 21px; font-weight: 600; margin: 0 0 4px; text-wrap: balance; }
+h3 { font-size: 16px; font-weight: 600; margin: 0 0 2px; }
+p { margin: 0 0 10px; max-width: 68ch; }
+.lede { color: var(--ink2); font-size: 16px; }
+.meta { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+section { margin-top: 44px; display: flex; flex-direction: column; gap: 18px; }
+.site-head { border-top: 2px solid var(--ink); padding-top: 14px; }
+.kind { color: var(--ink2); }
+.block { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.note { color: var(--ink2); font-size: 14px; }
+.notes { background: var(--note); border-radius: 6px; padding: 16px 18px; max-width: 80ch; }
+.notes h2 { margin-bottom: 8px; } .notes p, .notes li { max-width: none; }
+.chart { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; width: 100%; height: 420px; min-width: 0; }
+.chart.tall { height: 520px; } .chart.short { height: 340px; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 760px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 14px; }
+.controls label { color: var(--ink2); display: flex; gap: 6px; align-items: center; min-width: 0; max-width: 100%; }
+.controls select { min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+select, button { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--axis); border-radius: 5px; padding: 4px 8px; }
+select:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--landsat); outline-offset: 2px; }
+.tablebox { overflow-x: auto; }
+table { border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 5px 12px 5px 0; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--rule); }
+th { font-weight: 500; color: var(--ink2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+th.l, td.l { text-align: left; }
+td.num { font-family: var(--mono); font-size: 13px; }
+tr.ceva td { font-weight: 600; }
+tr.group td { padding-top: 14px; color: var(--ink2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: none; }
+nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--rule);
+  display: flex; flex-wrap: wrap; gap: 4px 18px; padding-block: 8px; margin-top: 18px; font-size: 14px; }
+nav a { color: var(--ink2); text-decoration: none; } nav a:hover { color: var(--ink); text-decoration: underline; }
+ul { margin: 0; padding-left: 20px; max-width: 68ch; } li { margin-bottom: 6px; }
+code { font-family: var(--mono); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>CEVA shoreline validation</h1>
+    <p class="lede">Shoreline positions measured from Landsat and Sentinel-2, compared with beach surveys at six sites and with the published algorithms of the SDS benchmark. Every chart can be zoomed by dragging and shows the values under the pointer. Double-click a chart to reset it.</p>
+    <p class="meta" id="meta"></p>
+  </header>
+  <nav id="nav"><a href="#summary">Summary</a><a href="#benchmark">Published algorithms</a></nav>
+
+  <section id="notes-section" hidden><div class="notes" id="notes"></div></section>
+
+  <section id="summary">
+    <div class="block">
+      <h2>The CoastSat and CEVA solutions compared</h2>
+      <p>Positions are metres along a cross-shore line, counted seaward. The error is satellite minus survey, so a negative bias means the satellite shoreline sits landward of the surveyed one. Bias is the mean error and spread its standard deviation; RMSE combines both. A constant bias does not affect rates of change; spread does.</p>
+    </div>
+    <div class="block" id="variant-legend"></div>
+    <div id="before-after"></div>
+  </section>
+
+  <section id="radar" hidden>
+    <div class="block">
+      <h2>Radar (Sentinel-1) as an additional source</h2>
+      <p>Radar sees through clouds, so it adds waterlines where and when the imagery has none. Its waterlines are detected separately, then aligned on the imagery: for each transect and orbit direction, the offset between radar and the imagery positions within 30 days is removed, with terms in wave height and tide. Only imagery is used to align them, never the surveys. Yearly positions “imagery + radar” weight the two by their precision. The CEVA solution learns what the waterline looks like in radar from the imagery (a template of the radar profile across the imagery's waterline, per orbit direction and wave class) and finds it in every radar image by matching that template; the CoastSat solution uses CoastSat's own radar land/water model.</p>
+    </div>
+    <div id="radar-sites"></div>
+  </section>
+
+  <section id="benchmark">
+    <div class="block">
+      <h2>Against the published algorithms</h2>
+      <p>The SDS benchmark (Vos et al. 2023) publishes the shoreline series each team produced. Here they are scored with the same surveys, transects and time matching as CEVA (survey interpolated to the image date when surveys exist within 10 days on both sides, otherwise the nearest survey within 3 days), so the numbers are directly comparable. Teams corrected for tides with the benchmark's recommended beach slope; most did not correct for waves.</p>
+    </div>
+    <div id="benchmark-sites"></div>
+  </section>
+
+  <section id="waterline" hidden>
+    <div class="block">
+      <h2>Where the satellite waterline sits</h2>
+      <p>For every satellite waterline matched to a survey, the height above the tide that the correction must use to put it exactly on the surveyed shoreline, with the beach slope CEVA uses. Within each beach it rises with the wave height by a similar amount; between beaches its mean differs. CEVA's “empirical” correction uses only the first part: a coefficient times the departure of the wave height from its usual value at the transect, fitted to all sites and tested on each site after fitting on the others only.</p>
+    </div>
+    <div id="waterline-body"></div>
+  </section>
+
+  <div id="sites"></div>
+
+  <section id="method">
+    <div class="block">
+      <h2>How the numbers were made</h2>
+      <ul>
+        <li><b>Imagery.</b> Every Landsat 4 to 9 (Collection 2, tier 1) and Sentinel-2 scene over each site, 1984 to 2025. Clouds, shadows and snow are removed with the providers' flags (Sentinel-2: high-probability cloud and cirrus only, as CoastSat does).</li>
+        <li><b>CEVA solution.</b> Surface reflectance read at 10 m steps along each transect. MNDWI = (green − SWIR1) / (green + SWIR1); the threshold is chosen with Otsu's method on the index samples near the expected shoreline, once per image and once per yearly composite, so it sits between the beach and water populations actually present.</li>
+        <li><b>CoastSat solution.</b> Image chips around coastal segments of 3 km; CoastSat's neural network labels pixels sand, white water, water or other; Otsu separates the MNDWI of sand and water; the waterline is the 2D contour at that level, intersected with each transect. Sentinel-2 is read as top-of-atmosphere reflectance (Level-1C, what the classifier was trained on), Landsat as surface reflectance until top-of-atmosphere Landsat can be downloaded.</li>
+        <li><b>Radar</b> (Sentinel-1, 2014 onwards). Terrain-corrected backscatter (gamma nought, VV and VH, 10 m) from the Planetary Computer, read like the imagery chips. Waterlines detected by each solution, then aligned on the imagery (see “Radar” above); they enter only the yearly positions marked “imagery + radar”.</li>
+        <li><b>Search window</b> (both). Within 150 m of the expected waterline: that year's composite shoreline, moved with the tide of the image along a curve measured on composites of images grouped by tide, so that it follows the waterline across flat, macrotidal beaches.</li>
+        <li><b>Water level</b> (both). Tide from the EOT20 model at each transect and image time, plus a wave correction fitted to the surveys: a coefficient per solution times the departure of the ERA5 significant wave height (about 20 km offshore) from its usual value at the transect.</li>
+        <li><b>Beach slope</b> (both). The spectral method of Vos et al. (2020): the slope that leaves the least energy at the frequencies where the satellites alias the tide.</li>
+        <li><b>Yearly composite</b> (after DEA Coastlines). For each year, the median index of the images taken with the tide in the central half of the observed range, then the seaward edge of the land.</li>
+        <li><b>Per image</b> (after CoastSat). One waterline per image near that year's composite shoreline, moved to mean sea level with <code>water level / tan β</code>. Outliers beyond 3 scaled median deviations from a running median are dropped. The yearly value is the median of the remaining positions.</li>
+        <li><b>Survey shoreline.</b> The 0 m contour (mean sea level; NAP in the Netherlands, AHD at Narrabeen) on each surveyed profile, found with the same seaward-edge rule.</li>
+        <li><b>Rates.</b> Ordinary least squares on yearly positions, with a 95 % interval. Satellite and survey rates are fitted on the years both have.</li>
+        <li><b>Netherlands, survey-centred.</b> JARKUS records the date of each profile. Satellite positions are also compared with the images taken around that date: the median of corrected single images within 45 days, and a composite of the images within 90 days.</li>
+      </ul>
+    </div>
+    <div class="block">
+      <h3>What this validation does not cover</h3>
+      <ul>
+        <li>Six sandy and gravel coasts. Estuaries, cliffs, rocky and muddy coasts are untested. Duck (USA) and Torrey Pines (USA), the other benchmark sites, could not be added: one survey server is unreachable from this network and the other requires an account.</li>
+        <li>No co-registration between sensors.</li>
+        <li>Default settings were chosen on physical and published grounds, not tuned on these sites. The water-level cut-off of Castelle et al. (2021) is shown as a sensitivity curve, not applied.</li>
+      </ul>
+    </div>
+    <p class="meta" id="credits"></p>
+  </section>
+</div>
+
+<script src="__PLOTLY__"></script>
+<script>
+const DATA = __DATA__;
+const $ = (s, el = document) => el.querySelector(s);
+const el = (tag, attrs = {}, html = "") => { const e = document.createElement(tag); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); e.innerHTML = html; return e; };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v)) ? "–" : Number(v).toFixed(d);
+const SENSOR_LABEL = { all: "Landsat + Sentinel-2", landsat: "Landsat", sentinel2: "Sentinel-2" };
+const ENGINE_LABEL = { annual: "Yearly composite", perimage: "Per image, yearly median" };
+const VARIANT_SHORT = { coastsat: "CoastSat solution", ceva: "CEVA solution" };
+// colours follow this order in every chart (validated for adjacent pairs in light and dark mode)
+const VARIANT_COLOR = { ceva: "v2", coastsat: "v3" };
+const ALGO_VARIANT = { "CEVA: CEVA solution": "ceva", "CEVA: CoastSat solution": "coastsat" };
+const drawers = [];
+const drawerOf = new Map();
+let built = false;
+
+function colors() {
+  return { ink: css("--ink"), ink2: css("--ink2"), muted: css("--muted"), grid: css("--grid"), axis: css("--axis"), surface: css("--surface"),
+    landsat: css("--landsat"), sentinel2: css("--s2"), composite: css("--composite"), perimage: css("--perimage"),
+    before: css("--before"), after: css("--after"), runup: css("--runup"), team: css("--team"),
+    v1: css("--v1"), v2: css("--v2"), v3: css("--v3"), v4: css("--v4"), v5: css("--v5"),
+    siteA: css("--siteA"), siteB: css("--siteB"), siteC: css("--siteC"), siteD: css("--siteD"), siteE: css("--siteE"), siteF: css("--siteF"),
+    erode: css("--erode"), accrete: css("--accrete"), mid: css("--mid") };
+}
+function axis(c, title, extra = {}) {
+  return Object.assign({ title: { text: title, font: { size: 12, color: c.ink2 } }, gridcolor: c.grid, linecolor: c.axis, zerolinecolor: c.axis,
+    tickfont: { color: c.muted, size: 11 }, automargin: true }, extra);
+}
+function layout(c, xTitle, yTitle, extra = {}) {
+  return Object.assign({ paper_bgcolor: c.surface, plot_bgcolor: c.surface, font: { family: css("--sans"), color: c.ink, size: 12 },
+    margin: { l: 56, r: 16, t: 36, b: 46 }, xaxis: axis(c, xTitle), yaxis: axis(c, yTitle), hovermode: "closest",
+    legend: { orientation: "h", y: 1.0, yanchor: "bottom", x: 0, font: { color: c.ink2, size: 12 }, bgcolor: "rgba(0,0,0,0)" },
+    hoverlabel: { bgcolor: c.surface, bordercolor: c.axis, font: { color: c.ink, family: css("--mono"), size: 12 } } }, extra);
+}
+const CONFIG = { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] };
+function chart(parent, cls, draw) {
+  const div = el("div", { class: "chart " + (cls || "") }); parent.appendChild(div);
+  const run = () => draw(div, colors()); drawerOf.set(div, run); drawers.push(run); if (built) run(); return div;
+}
+function redraw(div) { const d = drawerOf.get(div); if (built && d) d(); }
+function block(parent, title, note) {
+  const b = el("div", { class: "block" }); if (title) b.appendChild(el("h3", {}, title)); if (note) b.appendChild(el("p", { class: "note" }, note));
+  parent.appendChild(b); return b;
+}
+function table(parent, head, rows, rowClass) {
+  const isNum = v => typeof v === "number" || /^[-−+]?\d[\d.,]*$|^–$|^\d{4}–\d{4}$/.test(String(v));
+  const first = rows.find(r => !r.group) || [];
+  const left = head.map((_, i) => !isNum(first[i]));
+  const box = el("div", { class: "tablebox" }); const t = el("table");
+  t.appendChild(el("tr", {}, head.map((h, i) => `<th${left[i] ? ' class="l"' : ""}>${h}</th>`).join("")));
+  rows.forEach((r, k) => {
+    if (r.group) { t.appendChild(el("tr", { class: "group" }, `<td class="l" colspan="${head.length}">${r.group}</td>`)); return; }
+    t.appendChild(el("tr", rowClass ? { class: rowClass(r, k) || "" } : {}, r.map((v, i) => `<td class="${left[i] ? "l" : "num"}">${v}</td>`).join("")));
+  });
+  box.appendChild(t); parent.appendChild(box);
+}
+function selectBox(parent, label, options, id) {
+  const l = el("label", { for: id }, label); const s = el("select", { id });
+  options.forEach(([v, text]) => s.appendChild(el("option", { value: v }, text))); l.appendChild(s); parent.appendChild(l); return s;
+}
+const pick = (rows, engine, sensors) => rows.filter(r => r.engine === engine && r.sensors === sensors);
+const one = (rows, engine, sensors) => (rows || []).find(r => r.engine === engine && r.sensors === sensors) || {};
+const oneToOne = (lo, hi, c) => ({ x: [lo, hi], y: [lo, hi], mode: "lines", line: { color: c.axis, width: 1, dash: "dot" }, hoverinfo: "skip", showlegend: false });
+function setSelect(site, key) { const s = $("#" + key); if (s) { s.value = site; s.dispatchEvent(new Event("change")); s.scrollIntoView({ behavior: "smooth", block: "center" }); } }
+
+// ------------------------------------------------------------ before / after
+function beforeAfter() {
+  const legend = $("#variant-legend");
+  const ul = el("ul"); Object.entries(DATA.variant_labels).forEach(([k, v]) => ul.appendChild(el("li", {}, `<b>${VARIANT_SHORT[k] || k}</b>: ${v.replace(/^[^:]*: /, "")}`))); legend.appendChild(ul);
+  if (DATA.shared_method) legend.appendChild(el("p", { class: "note" }, DATA.shared_method));
+  const root = $("#before-after");
+  DATA.sites.forEach(s => {
+    const b = block(root, `<a href="#${s.key}">${s.title}</a>`);
+    const rows = [];
+    s.variants.forEach(v => {
+      const pi = (v.perimage || []).find(m => m.group === "all sensors" && m.position === "corrected") || {};
+      const ya = one(v.yearly, "annual", "all"), yp = one(v.yearly, "perimage", "all");
+      const ra = one(v.rates, "annual", "all"), rp = one(v.rates, "perimage", "all");
+      const sc = s.dense ? null : { a: one(v.survey_centred, "annual", "all"), p: one(v.survey_centred, "perimage", "all") };
+      const row = [VARIANT_SHORT[v.variant] || v.variant];
+      if (s.dense) row.push(fmt(pi.bias), fmt(pi.std), fmt(pi.rmse), fmt(pi.r, 2));
+      row.push(fmt(ya.bias), fmt(ya.std), fmt(yp.bias), fmt(yp.std));
+      if (!s.dense) row.push(fmt(sc.a.bias), fmt(sc.a.std), fmt(sc.p.bias), fmt(sc.p.std));
+      row.push(fmt(ra.rmse, 2), fmt(rp.rmse, 2));
+      rows.push(row);
+    });
+    const head = ["Method"];
+    if (s.dense) head.push("Image bias", "Image spread", "Image RMSE", "Image r");
+    head.push("Composite bias", "Composite spread", "Yearly-median bias", "Yearly-median spread");
+    if (!s.dense) head.push("Survey-date composite bias", "Survey-date composite spread", "Survey-date images bias", "Survey-date images spread");
+    head.push("Rate RMSE, composite (m/yr)", "Rate RMSE, images (m/yr)");
+    table(b, head, rows, r => r[0] === (VARIANT_SHORT[s.detail] || "After") ? "ceva" : "");
+    const n = s.dense ? "Image: single images against surveys within days, all sensors, after correction. " : "";
+    b.appendChild(el("p", { class: "note" }, n + (s.dense ? "Yearly: median of the year's surveys (years with at least 4)." : "Yearly: the single profile surveyed that year. Survey-date: only images taken around the recorded survey date.") + " All errors in metres."));
+  });
+}
+
+// ------------------------------------------------------------ radar
+function radarSection() {
+  const sites = DATA.sites.filter(s => s.variants.some(v => v.radar));
+  if (!sites.length) return;
+  $("#radar").hidden = false;
+  $("#nav").insertBefore(el("a", { href: "#radar" }, "Radar"), $("#nav").children[1] || null);
+  const root = $("#radar-sites");
+  const CLASS = ["calm", "moderate", "rough"];
+  sites.forEach(s => {
+    const b = block(root, `<a href="#${s.key}">${s.title}</a>`);
+    const rows = [];
+    let first = null;
+    s.variants.filter(v => v.radar).forEach(v => {
+      const R = v.radar; first = R.first_year;
+      const y = k => (R.yearly || []).find(m => m.sensors === k) || {};
+      const rt = k => (R.rates || []).find(m => m.sensors === k) || {};
+      const pi = k => (R.perimage || []).find(m => m.source === k) || {};
+      const row = [VARIANT_SHORT[v.variant] || v.variant];
+      if (s.dense) row.push(fmt(pi("imagery").rmse), fmt(pi("radar, as detected").rmse), fmt(pi("radar, aligned").rmse));
+      row.push(fmt(y("all").rmse), fmt(y("sentinel1").rmse), fmt(y("combined").rmse), fmt(rt("all").rmse, 2), fmt(rt("combined").rmse, 2),
+        fmt((R.obs_per_year || {}).all, 0), fmt((R.obs_per_year || {}).sentinel1, 0));
+      rows.push(row);
+    });
+    const head = ["Method"];
+    if (s.dense) head.push("Single images: imagery", "Radar as detected", "Radar aligned");
+    head.push("Yearly: imagery", "Radar", "Imagery + radar", "Rates: imagery (m/yr)", "Imagery + radar (m/yr)", "Images a year", "Radar images a year");
+    table(b, head, rows, r => r[0] === (VARIANT_SHORT[s.detail] || "") ? "ceva" : "");
+    b.appendChild(el("p", { class: "note" }, `RMSE in metres against the surveys, ${first} onwards (the full years of radar), all methods on the same years. ` +
+      (s.dense ? "Yearly: median of the year's surveys (years with at least 4). " : "Yearly: the single profile surveyed that year. ") + "Rates over the same years (transects with at least 5)."));
+    const v = s.variants.find(x => x.radar && x.radar.signature);
+    if (v) {
+      const sig = v.radar.signature;
+      chart(b, "", (div, c) => {
+        const traces = Object.keys(sig).sort().map(g => {
+          const [pass, k] = g.split("|");
+          return { x: sig[g].offset, y: sig[g].db, mode: "lines", name: `${pass}, ${CLASS[+k] || k} sea`,
+            line: { color: pass === "ascending" ? c.v3 : c.v2, width: 2, dash: ["solid", "dot", "dash"][+k] || "solid" },
+            hovertemplate: "%{x:.0f} m from the waterline<br>%{y:.1f} dB<extra>%{fullData.name}</extra>" };
+        });
+        Plotly.react(div, traces, layout(c, "Distance from the imagery's waterline (m, negative = landward)", "Backscatter, relative (dB)",
+          { shapes: [{ type: "line", x0: 0, x1: 0, yref: "paper", y0: 0, y1: 1, line: { color: c.axis, width: 1, dash: "dot" } }] }), CONFIG);
+      });
+      b.appendChild(el("p", { class: "note" }, "What a waterline looks like in radar here, learned from the imagery (CEVA solution): the median mean(VV, VH) profile across the imagery's waterline, each profile minus its mean, median over transects. Typically the wet beach and swash are dark just landward of the waterline and breaking waves bright just seaward of it."));
+    }
+  });
+}
+
+// ------------------------------------------------------------ benchmark
+function benchmarkSection() {
+  const root = $("#benchmark-sites");
+  DATA.sites.filter(s => s.benchmark && s.benchmark.length).forEach(s => {
+    const b = block(root, s.title);
+    const off = s.same_image_offset || {};
+    const side = o => `${fmt(Math.abs(o.median))} m ${o.median < 0 ? "landward" : "seaward"}`;
+    const parts = [];
+    if (off.ceva && off.ceva.n) parts.push(`the CEVA solution's raw waterline (before any correction) sits ${side(off.ceva)} of the published CoastSat waterline (${off.ceva.n} pairs, typical deviation ${fmt(off.ceva.mad)} m)`);
+    if (off.coastsat && off.coastsat.n) parts.push(`the CoastSat solution's (CoastSat's detection on CEVA's imagery, cloud mask and automatic reference line) ${side(off.coastsat)} (${off.coastsat.n} pairs, typical deviation ${fmt(off.coastsat.mad)} m)` +
+      (off.coastsat_geolocated && off.coastsat_geolocated.n ? `, and ${side(off.coastsat_geolocated)} once the published positions' half-pixel shift is removed` : ""));
+    if (parts.length) b.appendChild(el("p", { class: "note" }, `On the images both processed, ${parts.join("; ")}.`));
+    if (s.benchmark.some(r => r.algorithm.startsWith("CoastSat, half-pixel"))) b.appendChild(el("p", { class: "note" },
+      "“CoastSat, half-pixel shift removed”: CoastSat's published positions moved back by half a pixel (7.5 m on its 15 m Landsat grid, 5 m on the 10 m Sentinel-2 grid, to the west and north), projected on each transect. CoastSat converts contour coordinates, which count from pixel centres, with the image's GeoTIFF transform, which counts from the pixel corner, so every published point sits half a pixel north-west of where its pixels put it."));
+    const pair = el("div", { class: "pair" }); b.appendChild(pair);
+    const left = block(pair, "Single images, Landsat", "Each point is one algorithm. Closer to the bottom-centre is better: the distance from the origin is the RMSE (dotted circles every 10 m).");
+    chart(left, "", (div, c) => scatterAlgo(div, c, s.benchmark.filter(r => r.scale === "per image" && r.sensors === "landsat")));
+    const right = block(pair, "Yearly positions, Landsat", "Yearly median of each algorithm's positions (Deltares: its own yearly composite) against the median of that year's surveys.");
+    chart(right, "", (div, c) => scatterAlgo(div, c, s.benchmark.filter(r => r.scale === "yearly" && r.sensors === "landsat")));
+    const rows = [];
+    for (const [scale, sensors] of [["per image", "landsat"], ["per image", "sentinel2"], ["yearly", "landsat"], ["yearly", "sentinel2"]]) {
+      const sel = s.benchmark.filter(r => r.scale === scale && r.sensors === sensors).sort((a, b) => a.rmse - b.rmse);
+      if (!sel.length) continue;
+      rows.push({ group: `${scale === "per image" ? "Single images" : "Yearly"}, ${SENSOR_LABEL[sensors]}` });
+      sel.forEach(r => rows.push([r.algorithm, r.product, r.n, fmt(r.bias), fmt(r.std), fmt(r.rmse), fmt(r.r, 2)]));
+    }
+    table(b, ["Algorithm", "Product", "Pairs", "Bias (m)", "Spread (m)", "RMSE (m)", "r"], rows, r => String(r[0]).startsWith("CEVA") ? "ceva" : "");
+  });
+}
+function scatterAlgo(div, c, rows) {
+  // Published algorithms are labelled on the chart; CEVA's variants, which cluster, go in the legend.
+  const isCeva = r => r.algorithm.startsWith("CEVA");
+  const color = r => isCeva(r) ? (c[VARIANT_COLOR[ALGO_VARIANT[r.algorithm]]] || c.runup) : c.ink;
+  const lim = Math.max(10, ...rows.map(r => Math.abs(r.bias)), ...rows.map(r => r.std)) * 1.15;
+  const rings = [10, 20, 30, 40, 60].filter(v => v < lim * 1.4).map(v => ({ type: "circle", xref: "x", yref: "y", x0: -v, x1: v, y0: -v, y1: v,
+    line: { color: c.grid, width: 1, dash: "dot" }, layer: "below" }));
+  const order = Object.keys(ALGO_VARIANT);
+  const sorted = [...rows].sort((a, b) => (isCeva(a) ? order.indexOf(a.algorithm) : 99) - (isCeva(b) ? order.indexOf(b.algorithm) : 99));
+  const traces = sorted.map(r => {
+    const open = r.algorithm.includes("half-pixel");
+    const above = r.algorithm === "CoastSat" || r.algorithm === "SHOREX";
+    return { x: [r.bias], y: [r.std], name: r.algorithm, text: [open ? "CoastSat, shift removed" : r.algorithm], customdata: [[r.rmse, r.n, r.r, r.product, r.algorithm]],
+      mode: isCeva(r) ? "markers" : "markers+text", textposition: above ? "top center" : "bottom center", textfont: { size: 11, color: c.ink2 }, showlegend: isCeva(r),
+      marker: { size: isCeva(r) ? 13 : 10, color: open ? c.surface : color(r), symbol: "circle", line: { color: open ? color(r) : c.surface, width: 2 } },
+      hovertemplate: "%{customdata[4]} (%{customdata[3]})<br>bias %{x:.1f} m · spread %{y:.1f} m<br>RMSE %{customdata[0]:.1f} m · r %{customdata[2]:.2f} · %{customdata[1]} pairs<extra></extra>" };
+  });
+  Plotly.react(div, traces, layout(c, "Bias (m, negative = landward)", "Spread (m)", { xaxis: axis(c, "Bias (m, negative = landward)", { range: [-lim, lim], zeroline: true }),
+    yaxis: axis(c, "Spread (m)", { range: [0, lim] }), shapes: rings, margin: { l: 56, r: 16, t: 70, b: 46 } }), CONFIG);
+}
+
+// ------------------------------------------------------------ waterline height
+function waterlineSection() {
+  const W = DATA.waterline; if (!W) return;
+  $("#waterline").hidden = false;
+  $("#nav").appendChild(el("a", { href: "#waterline" }, "Waterline height"));
+  const root = $("#waterline-body"), [a] = W.coef, SITE_COLOR = ["siteA", "siteB", "siteC", "siteD", "siteE", "siteF"];
+  const title = Object.fromEntries(W.sites.map(s => [s.key, s.title]));
+  root.appendChild(el("p", { class: "note" }, `Fitted on all sites: ${fmt(a, 2)} m of extra height per metre of wave height above the transect's usual value.`));
+  const draw = (key, xTitle, model) => (div, c) => {
+    const traces = [];
+    W.sites.forEach((s, k) => {
+      const B = s[key], col = c[SITE_COLOR[k]] || c.team;
+      traces.push({ x: B.x, y: B.dz, mode: "lines+markers", name: s.title, line: { color: col, width: 2 }, marker: { color: col, size: 8, line: { color: c.surface, width: 2 } },
+        error_y: { type: "data", symmetric: false, array: B.q75.map((q, i) => q - B.dz[i]), arrayminus: B.dz.map((v, i) => v - B.q25[i]), color: col, thickness: 1, width: 0 },
+        customdata: B.x.map((_, i) => [B.n[i], B.q25[i], B.q75[i]]),
+        hovertemplate: `${s.title}<br>${xTitle.split(" (")[0].toLowerCase()} %{x:.2f} m<br>median height %{y:.2f} m (middle half %{customdata[1]:.2f} to %{customdata[2]:.2f})<br>%{customdata[0]} waterlines<extra></extra>` });
+      if (model) {
+        const xs = [Math.min(...B.x), Math.max(...B.x)];
+        traces.push({ x: xs, y: xs.map(h => s.dz_mean + a * (h - s.hs_mean)), mode: "lines", line: { color: col, width: 1.5, dash: "dash" }, showlegend: false, hoverinfo: "skip" });
+      }
+    });
+    Plotly.react(div, traces, layout(c, xTitle, "Waterline height above the tide (m)"), CONFIG);
+  };
+  const pair = el("div", { class: "pair" }); root.appendChild(pair);
+  let b = block(pair, "Against wave height", "Median in bins of offshore wave height; bars span the middle half of the values. Dashed: the fitted slope through each site's mean. The slopes are alike; the levels are not.");
+  chart(b, "", draw("by_hs", "Offshore significant wave height (m, ERA5)", true));
+  b = block(pair, "Against the tide", "Same, in bins of the tide at image time. Where the tide range is large the waterline sits well above a low tide: the sand stays saturated as the water falls.");
+  chart(b, "", draw("by_tide", "Tide at image time (m above mean sea level)", false));
+  b = block(root, "Predicting each site from the others", "Shoreline error (satellite minus survey) at each site, with the tide-only correction and with the model fitted on the other sites only. Same slopes and survey matching as the rest of the report.");
+  table(b, ["Site", "Correction", "Pairs", "Bias (m)", "Spread (m)", "RMSE (m)", "Coefficient (m per m of wave height)"],
+    W.loso.map(r => [title[r.site] || r.site, r.correction === "model" ? "+ wave anomaly, fitted on the other sites" : "tide only", r.n, fmt(r.bias), fmt(r.std), fmt(r.rmse),
+      r.correction === "model" ? fmt(r.coef_hs_anomaly, 2) : "–"]),
+    r => r[1].startsWith("+") ? "ceva" : "");
+  b = block(root, "What each beach keeps", "The mean offset left at each site, in shoreline position, with the beach's tide range, waves and the slope CEVA uses. No single descriptor (tide range, wave height, slope, Iribarren number) predicts them on a site left out; a model by beach type needs more sites.");
+  table(b, ["Site", "Mean offset (m, negative = landward)", "Height needed above the tide (m)", "Tide range (m)", "Mean wave height (m)", "Slope used"],
+    W.sites.map(s => [s.title, fmt(s.offset_m), fmt(s.dz_mean, 2), fmt(s.tide_range), fmt(s.hs_mean), fmt(s.slope, 3)]));
+}
+
+// ------------------------------------------------------------ per site
+function siteSection(site) {
+  const root = el("section", { id: site.key }); $("#sites").appendChild(root);
+  $("#nav").appendChild(el("a", { href: "#" + site.key }, site.title));
+  const head = el("div", { class: "block site-head" });
+  head.appendChild(el("h2", {}, site.title)); head.appendChild(el("p", { class: "kind" }, site.kind));
+  const r = site.run;
+  head.appendChild(el("p", { class: "meta" }, `${r.n_transects} transects · ${r.n_acquisitions} acquisitions · ${site.n_waterlines.toLocaleString()} waterlines, ${site.n_outliers.toLocaleString()} excluded · waves: ${r.wave_component}${r.wave_point ? ` (ERA5 at ${r.wave_point[1].toFixed(2)}°, ${r.wave_point[0].toFixed(2)}°)` : ""} · waterlines by ${r.perimage_engine === "coastsat" ? "CoastSat's detection" : "MNDWI along transects"} · median threshold ${fmt(r.median_threshold_perimage, 2)} per image, ${fmt(r.median_threshold_annual, 2)} composite · cube ${r.cube_snapshot}`));
+  head.appendChild(el("p", { class: "note" }, `Charts below show the “${VARIANT_SHORT[site.detail] || "After"}” method unless stated.`));
+  root.appendChild(head);
+  const ids = site.transects.map(t => t.id).filter(id => site.survey_annual[id] || (site.series && site.series[id])).sort((a, b) => {
+    const na = (site.survey_annual[a] || { year: [] }).year.length, nb = (site.survey_annual[b] || { year: [] }).year.length; return nb - na || a.localeCompare(b); });
+  if (site.dense) perImage(site, root, ids);
+  if (!site.dense) surveyCentred(site, root);
+  yearly(site, root, ids);
+  rates(site, root);
+  if (site.key === "jarkus") alongshore(site, root);
+}
+
+function perImage(site, root, ids) {
+  let b = block(root, "One transect through time", "Each dot is one satellite image after correction. Surveys are the black line.");
+  const ctl = el("div", { class: "controls" }); b.appendChild(ctl);
+  const sel = selectBox(ctl, "Transect", ids.filter(i => site.series[i]).map(i => [i, `${i} (${site.series[i].survey.t.length} surveys)`]), site.key + "-ts");
+  const mode = selectBox(ctl, "Satellite position", [["x", "moved to mean sea level"], ["xo", "as observed"]], site.key + "-mode");
+  const ts = chart(b, "tall", (div, c) => {
+    const s = site.series[sel.value], key = mode.value, traces = [];
+    const fam = p => p.startsWith("landsat") ? "landsat" : "sentinel2";
+    [["landsat", "Landsat"], ["sentinel2", "Sentinel-2"]].forEach(([f, name]) => {
+      const i = s.sat.t.map((_, k) => k).filter(k => fam(s.sat.p[k]) === f && !s.sat.out[k]);
+      traces.push({ x: i.map(k => s.sat.t[k]), y: i.map(k => s.sat[key][k]), customdata: i.map(k => [s.sat.p[k], s.sat.tide[k], s.sat.xo[k], s.sat.x[k], s.sat.wave[k]]),
+        mode: "markers", name, marker: { color: c[f], size: 5, opacity: 0.75 },
+        hovertemplate: "%{x|%Y-%m-%d %H:%M}<br>%{customdata[0]}<br>observed %{customdata[2]} m · at mean sea level %{customdata[3]} m<br>tide %{customdata[1]} m · wave correction %{customdata[4]} m<extra></extra>" });
+    });
+    const o = s.sat.t.map((_, k) => k).filter(k => s.sat.out[k]);
+    traces.push({ x: o.map(k => s.sat.t[k]), y: o.map(k => s.sat[key][k]), mode: "markers", name: "Excluded", visible: "legendonly",
+      marker: { color: c.muted, size: 5, symbol: "x-thin", line: { width: 1, color: c.muted } }, hovertemplate: "%{x|%Y-%m-%d}<br>%{y} m (excluded)<extra></extra>" });
+    const a = (site.annual_series[sel.value] || {})["annual|all"];
+    if (a) traces.push({ x: a.year.map(y => y + "-07-01"), y: a.x, mode: "lines+markers", name: "Yearly composite", line: { color: c.composite, width: 2 }, marker: { size: 6 },
+      customdata: a.n, hovertemplate: "%{x|%Y}<br>yearly composite %{y} m<br>%{customdata} images<extra></extra>" });
+    traces.push({ x: s.survey.t, y: s.survey.x, mode: "lines+markers", name: "Survey", line: { color: c.ink, width: 1.5 }, marker: { size: 4, color: c.ink },
+      hovertemplate: "%{x|%Y-%m-%d}<br>survey %{y} m<extra></extra>" });
+    const rng = site.survey_range, y0 = Number(rng[0].slice(0, 4)), y1 = Number(rng[1].slice(0, 4));
+    Plotly.react(div, traces, layout(c, "", "Shoreline position (m, seaward positive)", { xaxis: axis(c, "", { range: [`${Math.max(y0, y1 - 17)}-01-01`, `${y1 + 1}-01-01`] }) }), CONFIG);
+  });
+  sel.addEventListener("change", () => redraw(ts)); mode.addEventListener("change", () => redraw(ts));
+
+  b = block(root, "Each image against the survey", "After the changes, excluded images left out. r is the correlation of the two series after removing each transect's mean, so it measures whether the satellite follows the real movements.");
+  table(b, ["Sensor", "Position", "Pairs", "Bias (m)", "Spread (m)", "RMSE (m)", "Median abs. (m)", "r"],
+    site.perimage_metrics.map(m => [m.group, m.position, m.n, fmt(m.bias), fmt(m.std), fmt(m.rmse), fmt(m.mae), fmt(m.r, 2)]));
+
+  const M = site.matched, idx = [...Array(M.t.length).keys()];
+  const pair = el("div", { class: "pair" }); root.appendChild(pair);
+  b = block(pair, "Satellite against survey", "Both as departures from the transect's own mean. Points on the dotted line would be perfect.");
+  chart(b, "", (div, c) => {
+    const sum = {};
+    idx.forEach(k => { const t = M.tid[k]; sum[t] = sum[t] || [0, 0, 0]; sum[t][0] += M.x[k]; sum[t][1] += M.xs[k]; sum[t][2]++; });
+    const traces = [oneToOne(-80, 80, c)];
+    [["landsat", "Landsat"], ["sentinel2", "Sentinel-2"]].forEach(([f, name]) => { const i = idx.filter(k => M.f[k] === f);
+      traces.push({ x: i.map(k => M.xs[k] - sum[M.tid[k]][1] / sum[M.tid[k]][2]), y: i.map(k => M.x[k] - sum[M.tid[k]][0] / sum[M.tid[k]][2]), customdata: i.map(k => [M.tid[k], M.t[k], M.p[k], M.level[k], M.gap[k]]),
+        mode: "markers", name, marker: { color: c[f], size: 5, opacity: 0.6 },
+        hovertemplate: "%{customdata[0]} · %{customdata[1]} · %{customdata[2]}<br>survey %{x:.1f} m · satellite %{y:.1f} m<br>water level %{customdata[3]} m · nearest survey %{customdata[4]} d<extra></extra>" }); });
+    Plotly.react(div, traces, layout(c, "Survey, departure from mean (m)", "Satellite, departure from mean (m)"), CONFIG);
+  });
+  b = block(pair, "Bias by season, by method", "Mean error of single images by season. Waves are largest in the stormy season, so a wave correction should reduce the bias most there.");
+  chart(b, "", (div, c) => {
+    const order = ["winter", "spring", "summer", "autumn"];
+    const traces = site.variants.map(v => { const by = Object.fromEntries((v.seasons || []).map(s => [s.season, s]));
+      return { x: order, y: order.map(s => (by[s] || {}).bias), customdata: order.map(s => [(by[s] || {}).std, (by[s] || {}).n]), type: "bar", name: VARIANT_SHORT[v.variant] || v.variant,
+        marker: { color: c[VARIANT_COLOR[v.variant]] || c.team, line: { color: c.surface, width: 1 } },
+        hovertemplate: "%{fullData.name}, %{x}<br>bias %{y:.1f} m · spread %{customdata[0]:.1f} m<br>%{customdata[1]} pairs<extra></extra>" }; });
+    Plotly.react(div, traces, layout(c, "Season (December–February is winter)", "Mean error (m)", { barmode: "group", bargap: 0.25 }), CONFIG);
+  });
+
+  const pair2 = el("div", { class: "pair" }); root.appendChild(pair2);
+  const tr = site.tide_response, sl = site.slopes;
+  b = block(pair2, "Does the waterline follow the water level?", `Error of the observed waterline (before correction) against the total water level at image time. It moves ${fmt(-tr.gradient_level)} m landward per metre of water level${tr.apparent_slope ? `, as on a slope of ${fmt(tr.apparent_slope, 3)}` : ""}.` + (sl.survey_median ? ` The surveyed beach-face slope is ${fmt(sl.survey_median, 3)}, which would give ${fmt(1 / sl.survey_median, 0)} m per metre (dashed line, drawn through the same offset).` : ""));
+  chart(b, "", (div, c) => {
+    const traces = [["landsat", "Landsat"], ["sentinel2", "Sentinel-2"]].map(([f, name]) => { const i = idx.filter(k => M.f[k] === f);
+      return { x: i.map(k => M.level[k]), y: i.map(k => M.xo[k] - M.xs[k]), customdata: i.map(k => [M.tid[k], M.t[k], M.p[k], M.tide[k]]), mode: "markers", name, marker: { color: c[f], size: 5, opacity: 0.55 },
+        hovertemplate: "%{customdata[0]} · %{customdata[1]} · %{customdata[2]}<br>water level %{x} m (tide %{customdata[3]} m)<br>observed − survey %{y:.1f} m<extra></extra>" }; });
+    const lv = M.level.filter(v => v !== null), xs = [Math.min(...lv), Math.max(...lv)];
+    traces.push({ x: xs, y: xs.map(t => tr.intercept_level + tr.gradient_level * t), mode: "lines", name: "Fit", line: { color: c.ink, width: 2 }, hoverinfo: "skip" });
+    if (sl.survey_median) traces.push({ x: xs, y: xs.map(t => tr.intercept_level - t / sl.survey_median), mode: "lines", name: "Expected from surveyed slope", line: { color: c.muted, width: 2, dash: "dash" }, hoverinfo: "skip" });
+    Plotly.react(div, traces, layout(c, "Total water level at image time (m above mean sea level)", "Observed waterline − surveyed shoreline (m)"), CONFIG);
+  });
+  b = block(pair2, "Sensitivity to the beach slope", `Spread and bias when one slope is used everywhere. Medians: spectral estimate ${fmt(sl.spectral_median, 3)}, regression ${fmt(sl.regression_median, 3)}` + (sl.survey_median ? `, surveys ${fmt(sl.survey_median, 3)}` : "") + (sl.benchmark ? `, benchmark recommendation ${fmt(sl.benchmark, 2)}.` : "."));
+  chart(b, "", (div, c) => {
+    const S = site.slope_sensitivity, ht = "slope %{x}<br>%{y:.1f} m<extra>%{fullData.name}</extra>";
+    const mark = (x, text) => x ? ({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 0.8, line: { color: c.axis, width: 1, dash: "dot" }, label: { text, textangle: -90, font: { size: 10, color: c.muted }, textposition: "end", padding: 4 } }) : null;
+    Plotly.react(div, [
+      { x: S.map(s => s.slope), y: S.map(s => s.std), mode: "lines+markers", name: "Spread", line: { color: c.composite, width: 2 }, marker: { size: 8 }, hovertemplate: ht },
+      { x: S.map(s => s.slope), y: S.map(s => Math.abs(s.bias)), mode: "lines+markers", name: "Bias (absolute)", line: { color: c.perimage, width: 2 }, marker: { size: 8 }, hovertemplate: ht }],
+      layout(c, "Beach slope used for the correction (tan β, log scale)", "Metres", { xaxis: axis(c, "Beach slope used for the correction (tan β, log scale)", { type: "log", tickvals: [0.02, 0.03, 0.05, 0.1, 0.2, 0.3], ticktext: ["0.02", "0.03", "0.05", "0.1", "0.2", "0.3"] }),
+        shapes: [mark(sl.survey_median, "surveyed"), mark(sl.benchmark, "benchmark"), mark(sl.spectral_median, "spectral"), mark(sl.regression_median, "regression")].filter(Boolean) }), CONFIG);
+  });
+
+  const pair3 = el("div", { class: "pair" }); root.appendChild(pair3);
+  b = block(pair3, "Leaving out images taken at low water", "Castelle et al. (2021) drop images taken below a total water level, where the low-tide terrace and bars blur the waterline. Each point keeps only the images at or above that level. Not applied by default.");
+  chart(b, "", (div, c) => {
+    const W = site.water_level_curve.filter(r => r.threshold !== null);
+    const all = site.water_level_curve.find(r => r.threshold === null) || {};
+    Plotly.react(div, [
+      { x: W.map(r => r.threshold), y: W.map(r => r.std), customdata: W.map(r => [r.n_images, r.n, r.rmse]), mode: "lines+markers", name: "Spread", line: { color: c.composite, width: 2 }, marker: { size: 7 },
+        hovertemplate: "keep ≥ %{x} m<br>spread %{y:.1f} m · RMSE %{customdata[2]:.1f} m<br>%{customdata[0]} images, %{customdata[1]} pairs<extra></extra>" },
+      { x: W.map(r => r.threshold), y: W.map(r => Math.abs(r.bias)), mode: "lines+markers", name: "Bias (absolute)", line: { color: c.perimage, width: 2 }, marker: { size: 7 }, hovertemplate: "keep ≥ %{x} m<br>|bias| %{y:.1f} m<extra></extra>" },
+      { x: W.map(r => r.threshold), y: W.map(r => 100 * r.n / (all.n || 1)), yaxis: "y2", mode: "lines", name: "Pairs kept (%)", line: { color: c.muted, width: 1.5, dash: "dot" }, hovertemplate: "keep ≥ %{x} m<br>%{y:.0f} % of pairs kept<extra></extra>" }],
+      layout(c, "Minimum total water level kept (m above mean sea level)", "Metres", { yaxis2: axis(c, "Pairs kept (%)", { overlaying: "y", side: "right", range: [0, 105], showgrid: false }), margin: { l: 56, r: 56, t: 36, b: 46 } }), CONFIG);
+  });
+  b = block(pair3, "Tide height when the satellites pass", "Number of images per tide height. Satellites pass at the same local solar time, so they do not sample the tide evenly.");
+  chart(b, "", (div, c) => {
+    const E = site.tide_sampling.edges, mid = E.slice(0, -1).map((e, i) => (e + E[i + 1]) / 2);
+    Plotly.react(div, [["landsat", "Landsat"], ["sentinel2", "Sentinel-2"]].map(([f, name]) => ({ x: mid, y: site.tide_sampling[f], type: "bar", name, marker: { color: c[f], line: { color: c.surface, width: 1 } },
+      hovertemplate: name + "<br>tide %{x} m<br>%{y} images<extra></extra>" })), layout(c, "Tide height (m above mean sea level)", "Images", { barmode: "group", bargap: 0.15 }), CONFIG);
+  });
+
+  b = block(root, "Beach slope per transect", "Surveyed: fitted between mean sea level and the upper beach on each survey, median over surveys. Spectral and regression: estimated from the satellite waterlines.");
+  table(b, ["Transect", "Surveyed", "Spectral (after)", "Regression (before)", "Used"],
+    site.transects.filter(t => t.sign !== 0).map(t => [t.id, fmt(t.slope_survey, 3), fmt(t.slope, 3), fmt(t.slope_regression, 3), fmt(t.slope_used, 3)]));
+}
+
+function surveyCentred(site, root) {
+  const b = block(root, "Matching the survey date", `JARKUS records when each profile was surveyed (${fmt(100 * site.dated_fraction, 0)} % of profiles are dated). Comparing the survey with images taken around that date removes the part of the error that comes from comparing a single date with a whole year.`);
+  const rows = [];
+  site.variants.forEach(v => {
+    for (const [engine, label] of [["annual", "Composite of images within 90 days"], ["perimage", "Median of single images within 45 days"]]) {
+      const m = one(v.survey_centred, engine, "all"), y = one(v.yearly, engine, "all");
+      rows.push([VARIANT_SHORT[v.variant] || v.variant, label, m.n, fmt(m.bias), fmt(m.std), fmt(m.std_within), fmt(m.rmse), fmt(y.std)]);
+    }
+  });
+  table(b, ["Method", "Satellite value", "Pairs", "Bias (m)", "Spread (m)", "Spread within transects (m)", "RMSE (m)", "Spread, calendar year (m)"], rows, r => r[0] === (VARIANT_SHORT[site.detail] || "After") ? "ceva" : "");
+  b.appendChild(el("p", { class: "note" }, "Spread within transects: after removing each transect's own mean error, which compares with the bias-corrected figures reported by DEA Coastlines."));
+}
+
+function yearly(site, root, ids) {
+  let b = block(root, "Yearly shoreline against the survey", site.dense ? "Survey value: median of the year's surveys, for years with at least 4." : "Survey value: the single profile measured that year.");
+  table(b, ["Method", "Sensors", "Pairs", "Bias (m)", "Spread (m)", "Spread within transects (m)", "RMSE (m)", "Median abs. (m)", "r"],
+    site.annual_metrics.map(m => [ENGINE_LABEL[m.engine], SENSOR_LABEL[m.sensors], m.n, fmt(m.bias), fmt(m.std), fmt(m.std_within), fmt(m.rmse), fmt(m.mae), fmt(m.r, 2)]));
+
+  if (!site.dense) {
+    b = block(root, "One transect through time", "Yearly positions from the survey and from each method. Pick a transect, or click one in the charts below.");
+    const ctl = el("div", { class: "controls" }); b.appendChild(ctl);
+    const sel = selectBox(ctl, "Transect", ids.map(i => [i, i]), site.key + "-ts");
+    const ts = chart(b, "tall", (div, c) => {
+      const A = site.annual_series[sel.value] || {}, S = site.survey_annual[sel.value], traces = [];
+      const add = (key, name, color, w, vis) => { const a = A[key]; if (a) traces.push({ x: a.year, y: a.x, customdata: a.n, mode: "lines+markers", name, visible: vis ? true : "legendonly", line: { color, width: w }, marker: { size: 6 },
+        hovertemplate: "%{x}<br>" + name + " %{y} m<br>%{customdata} images<extra></extra>" }); };
+      add("annual|all", "Yearly composite", c.composite, 2, true); add("perimage|all", "Per image, yearly median", c.perimage, 2, true);
+      add("annual|landsat", "Composite, Landsat only", c.landsat, 1.5, false); add("annual|sentinel2", "Composite, Sentinel-2 only", c.sentinel2, 1.5, false);
+      if (S) traces.push({ x: S.year, y: S.x, mode: "lines+markers", name: "Survey", line: { color: c.ink, width: 2 }, marker: { size: 6, color: c.ink }, hovertemplate: "%{x}<br>survey %{y} m<extra></extra>" });
+      Plotly.react(div, traces, layout(c, "", "Shoreline position (m, seaward positive)"), CONFIG);
+    });
+    sel.addEventListener("change", () => redraw(ts));
+  }
+
+  const pair = el("div", { class: "pair" }); root.appendChild(pair);
+  b = block(pair, "Yearly positions, satellite against survey", "Departures from each transect's mean.");
+  const ctl = el("div", { class: "controls" }); b.appendChild(ctl);
+  const sets = site.annual_metrics.map(m => [`${m.engine}|${m.sensors}`, `${ENGINE_LABEL[m.engine]}, ${SENSOR_LABEL[m.sensors]}`]);
+  const set = selectBox(ctl, "Result", sets, site.key + "-set");
+  const sc = chart(b, "", (div, c) => {
+    const [engine, sensors] = set.value.split("|"), P = pick(site.annual_pairs, engine, sensors), m = {};
+    P.forEach(p => { m[p.transect_id] = m[p.transect_id] || [0, 0, 0]; m[p.transect_id][0] += p.x; m[p.transect_id][1] += p.x_survey; m[p.transect_id][2]++; });
+    const xs = P.map(p => p.x_survey - m[p.transect_id][1] / m[p.transect_id][2]), ys = P.map(p => p.x - m[p.transect_id][0] / m[p.transect_id][2]);
+    const ext = xs.concat(ys).filter(Number.isFinite), lo = Math.min(...ext), hi = Math.max(...ext);
+    Plotly.react(div, [oneToOne(lo, hi, c), { x: xs, y: ys, customdata: P.map(p => [p.transect_id, p.year, p.error, p.n_obs]), type: "scattergl", mode: "markers", showlegend: false,
+      marker: { color: P.map(p => p.year), colorscale: [[0, c.mid], [1, c.landsat]], size: 5, opacity: 0.8, colorbar: { title: { text: "Year", font: { size: 11, color: c.ink2 } }, thickness: 10, tickfont: { color: c.muted, size: 10 }, outlinewidth: 0 } },
+      hovertemplate: "%{customdata[0]} · %{customdata[1]}<br>survey %{x:.1f} m · satellite %{y:.1f} m<br>error %{customdata[2]} m · %{customdata[3]} images<extra></extra>" }],
+      layout(c, "Survey, departure from mean (m)", "Satellite, departure from mean (m)"), CONFIG);
+    div.removeAllListeners && div.removeAllListeners("plotly_click");
+    div.on("plotly_click", e => { const t = e.points[0].customdata && e.points[0].customdata[0]; if (t) setSelect(t, site.key + "-ts"); });
+  });
+  b = block(pair, "Error through the years", "Mean error per year (line) with the range holding the central 80 % of transects. A drift here would bias rates of change.");
+  const band = chart(b, "", (div, c) => {
+    const [engine, sensors] = set.value.split("|"), P = pick(site.annual_pairs, engine, sensors), by = {};
+    P.forEach(p => (by[p.year] = by[p.year] || []).push(p.error));
+    const years = Object.keys(by).map(Number).sort((a, b) => a - b), q = (a, f) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(f * s.length))]; };
+    const mean = years.map(y => by[y].reduce((a, v) => a + v, 0) / by[y].length);
+    Plotly.react(div, [
+      { x: years, y: years.map(y => q(by[y], 0.9)), mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
+      { x: years, y: years.map(y => q(by[y], 0.1)), mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: c.mid, name: "Central 80 % of transects", hoverinfo: "skip" },
+      { x: years, y: mean, customdata: years.map(y => by[y].length), mode: "lines+markers", name: "Mean error", line: { color: c.composite, width: 2 }, marker: { size: 6 }, hovertemplate: "%{x}<br>mean error %{y:.1f} m<br>%{customdata} transects<extra></extra>" }],
+      layout(c, "", "Satellite − survey (m)"), CONFIG);
+  });
+  set.addEventListener("change", () => { redraw(sc); redraw(band); document.dispatchEvent(new CustomEvent("set-" + site.key)); });
+}
+
+function rates(site, root) {
+  const b = block(root, "Rates of change", "Each point is one transect, with 95 % intervals. Follows the result chosen above. Click a point to see that transect.");
+  table(b, ["Method", "Sensors", "Transects", "Years", "Bias (m/yr)", "RMSE (m/yr)", "r"],
+    site.rate_metrics.map(m => [ENGINE_LABEL[m.engine], SENSOR_LABEL[m.sensors], m.n, `${m.first_year}–${m.last_year}`, fmt(m.bias, 2), fmt(m.rmse, 2), fmt(m.r, 2)]));
+  const ch = chart(b, "tall", (div, c) => {
+    const [engine, sensors] = $("#" + site.key + "-set").value.split("|"), R = pick(site.rates, engine, sensors);
+    const all = R.flatMap(r => [r.rate_lo, r.rate_hi, r.rate_lo_survey, r.rate_hi_survey]).filter(Number.isFinite);
+    const lo = all.length ? Math.min(...all) : -1, hi = all.length ? Math.max(...all) : 1;
+    Plotly.react(div, [oneToOne(lo, hi, c), { x: R.map(r => r.rate_survey), y: R.map(r => r.rate), customdata: R.map(r => [r.transect_id, r.n_years, r.first_year, r.last_year, r.rate_lo, r.rate_hi, r.rate_lo_survey, r.rate_hi_survey]),
+      error_x: { type: "data", symmetric: false, array: R.map(r => r.rate_hi_survey - r.rate_survey), arrayminus: R.map(r => r.rate_survey - r.rate_lo_survey), color: c.axis, thickness: 1, width: 0 },
+      error_y: { type: "data", symmetric: false, array: R.map(r => r.rate_hi - r.rate), arrayminus: R.map(r => r.rate - r.rate_lo), color: c.axis, thickness: 1, width: 0 },
+      mode: "markers", showlegend: false, marker: { color: c.composite, size: 8, line: { color: c.surface, width: 1.5 } },
+      hovertemplate: "%{customdata[0]} · %{customdata[1]} years, %{customdata[2]}–%{customdata[3]}<br>survey %{x:.2f} m/yr [%{customdata[6]:.2f}, %{customdata[7]:.2f}]<br>satellite %{y:.2f} m/yr [%{customdata[4]:.2f}, %{customdata[5]:.2f}]<extra></extra>" }],
+      layout(c, "Surveyed rate (m/yr, positive = seaward)", "Satellite rate (m/yr)"), CONFIG);
+    div.removeAllListeners && div.removeAllListeners("plotly_click");
+    div.on("plotly_click", e => { const t = e.points[0].customdata && e.points[0].customdata[0]; if (t) setSelect(t, site.key + "-ts"); });
+  });
+  document.addEventListener("set-" + site.key, () => redraw(ch));
+}
+
+function alongshore(site, root) {
+  const b = block(root, "Rates along the coast", "South to north. The large seaward rates are sand nourishments, including the reinforcement of the Hondsbossche sea wall with a new beach in 2015. Click a point to see that transect.");
+  const lat = Object.fromEntries(site.transects.map(t => [t.id, t.lat]));
+  const ch = chart(b, "tall", (div, c) => {
+    const [engine, sensors] = $("#" + site.key + "-set").value.split("|"), R = pick(site.rates, engine, sensors).sort((a, b) => lat[a.transect_id] - lat[b.transect_id]);
+    const cd = R.map(r => [r.transect_id, r.first_year, r.last_year]);
+    Plotly.react(div, [
+      { x: R.map(r => lat[r.transect_id]), y: R.map(r => r.rate_survey), customdata: cd, mode: "lines+markers", name: "Survey", line: { color: c.ink, width: 1.5 }, marker: { size: 5 }, hovertemplate: "%{customdata[0]} · %{x:.3f}°N<br>survey %{y:.2f} m/yr<extra></extra>" },
+      { x: R.map(r => lat[r.transect_id]), y: R.map(r => r.rate), customdata: cd, mode: "lines+markers", name: "Satellite", line: { color: c.composite, width: 2 }, marker: { size: 6 }, hovertemplate: "%{customdata[0]} · %{x:.3f}°N<br>satellite %{y:.2f} m/yr<br>%{customdata[1]}–%{customdata[2]}<extra></extra>" }],
+      layout(c, "Latitude (°N)", "Rate of change (m/yr, positive = seaward)"), CONFIG);
+    div.removeAllListeners && div.removeAllListeners("plotly_click");
+    div.on("plotly_click", e => { const t = e.points[0].customdata && e.points[0].customdata[0]; if (t) setSelect(t, site.key + "-ts"); });
+  });
+  document.addEventListener("set-" + site.key, () => redraw(ch));
+}
+
+// ------------------------------------------------------------ start
+$("#meta").textContent = `Generated ${DATA.generated} · ceva ${DATA.version}`;
+if (DATA.notes) { $("#notes").innerHTML = DATA.notes; $("#notes-section").hidden = false; }
+beforeAfter();
+radarSection();
+benchmarkSection();
+waterlineSection();
+DATA.sites.forEach(siteSection);
+$("#credits").innerHTML = DATA.sites.map(s => s.attribution).join(" · ") + " · Landsat: USGS via Microsoft Planetary Computer · Sentinel-2: Copernicus · Sentinel-1: contains modified Copernicus Sentinel data, terrain corrected by Catalyst, via Microsoft Planetary Computer (CC BY 4.0) · Tides: EOT20 (Hart-Davis et al. 2021) · Waves: ERA5 (Copernicus Climate Change Service) via Open-Meteo · Benchmark submissions: SDS_Benchmark (Vos et al. 2023)";
+built = true;
+drawers.forEach(d => d());
+const resizer = new ResizeObserver(entries => entries.forEach(e => { if (e.target.data) Plotly.Plots.resize(e.target); }));
+document.querySelectorAll("div.chart").forEach(d => resizer.observe(d));
+let pending; const rerender = () => { clearTimeout(pending); pending = setTimeout(() => drawers.forEach(d => d()), 60); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", rerender);
+new MutationObserver(rerender).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+</script>
